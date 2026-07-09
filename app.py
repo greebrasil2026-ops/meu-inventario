@@ -41,17 +41,40 @@ st.markdown("""
 
     /* Sidebar */
     section[data-testid="stSidebar"] {
-        background-color: #0B1120;
+        background-color: #0B1120 !important;
         border-right: 1px solid #1E293B;
     }
-    section[data-testid="stSidebar"] * { color: #CBD5E1 !important; }
-    section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
-        color: #F8FAFC !important; font-weight: 800 !important;
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] label,
+    section[data-testid="stSidebar"] p,
+    section[data-testid="stSidebar"] span,
+    section[data-testid="stSidebar"] div,
+    section[data-testid="stSidebar"] .stMarkdown,
+    section[data-testid="stSidebar"] .stCaption {
+        color: #E2E8F0 !important;
     }
+    section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
+        color: #FFFFFF !important; font-weight: 800 !important;
+    }
+
+    /* Texto das opções de rádio (Tirar Foto / Subir da Galeria) */
+    section[data-testid="stSidebar"] .stRadio label p,
+    section[data-testid="stSidebar"] div[role="radiogroup"] label p {
+        color: #F1F5F9 !important; font-weight: 500 !important; font-size: 14.5px;
+    }
+    /* Pílula da opção selecionada: tom índigo suave em vez de cinza sem graça */
+    section[data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+        background-color: rgba(99, 102, 241, 0.18) !important;
+        border-radius: 8px;
+    }
+
     section[data-testid="stSidebar"] .stTextInput input,
     section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
         background-color: #16213A !important; color: #F1F5F9 !important;
         border-radius: 8px !important; border: 1px solid #2A3752 !important;
+    }
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
+        color: #F1F5F9 !important;
     }
 
     section[data-testid="stSidebar"] .stTextInput input {
@@ -61,17 +84,23 @@ st.markdown("""
         opacity: 1 !important;
     }
     section[data-testid="stSidebar"] .stTextInput input::placeholder {
-        color: #64748B !important;
-        -webkit-text-fill-color: #64748B !important;
+        color: #7B8AA8 !important;
+        -webkit-text-fill-color: #7B8AA8 !important;
         opacity: 1 !important;
     }
 
     /* Radio buttons da sidebar (deixa de ser vermelho, vira índigo) */
     section[data-testid="stSidebar"] .stRadio label span[data-baseweb="radio"] div:first-child {
-        border-color: #6366F1 !important;
+        border-color: #818CF8 !important;
     }
     section[data-testid="stSidebar"] .stRadio label span[data-baseweb="radio"] div div {
-        background-color: #6366F1 !important;
+        background-color: #818CF8 !important;
+    }
+
+    section[data-testid="stSidebar"] .stCaption,
+    section[data-testid="stSidebar"] .stCaption p,
+    section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
+        color: #94A3B8 !important; font-size: 12.5px;
     }
 
     section[data-testid="stSidebar"] .stButton button {
@@ -137,6 +166,12 @@ st.markdown("""
     .card-wrapper:has(.foto-frame:hover) {
         position: relative;
         z-index: 9500 !important;
+    }
+
+    /* Rótulos dos campos na área principal (Filtros de Busca) */
+    div[data-testid="stTextInput"] label p,
+    div[data-testid="stSelectbox"] label p {
+        color: #312E81 !important; font-weight: 700 !important; font-size: 13.5px;
     }
 
     .foto-indisponivel {
