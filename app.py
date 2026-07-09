@@ -16,7 +16,7 @@ st.markdown("""
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 
     /* Fundo geral suave */
-    .stApp { background-color: #F1F5F9; }
+    .stApp { background-color: #EEF1F6; }
 
     /* Assinatura */
     .assinatura {
@@ -24,53 +24,64 @@ st.markdown("""
         text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;
     }
 
-    /* Cabeçalho principal */
+    /* Cabeçalho principal — slate + índigo, mais sóbrio */
     .header-box {
-        background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%);
+        background: linear-gradient(135deg, #1E1B4B 0%, #3730A3 55%, #4338CA 100%);
         padding: 28px 32px; border-radius: 16px; margin-bottom: 28px;
-        box-shadow: 0 8px 24px rgba(30, 58, 138, 0.25);
+        box-shadow: 0 8px 24px rgba(30, 27, 75, 0.28);
+        border: 1px solid rgba(255,255,255,0.06);
     }
     .header-box h1 {
         color: #FFFFFF; font-size: 26px; font-weight: 800; margin: 0;
+        letter-spacing: -0.2px;
     }
     .header-box p {
-        color: #DBEAFE; font-size: 14px; margin: 4px 0 0 0; font-weight: 500;
+        color: #C7D2FE; font-size: 14px; margin: 4px 0 0 0; font-weight: 500;
     }
 
     /* Sidebar */
     section[data-testid="stSidebar"] {
-        background-color: #0F172A;
+        background-color: #0B1120;
+        border-right: 1px solid #1E293B;
     }
-    section[data-testid="stSidebar"] * { color: #E2E8F0 !important; }
+    section[data-testid="stSidebar"] * { color: #CBD5E1 !important; }
     section[data-testid="stSidebar"] h2, section[data-testid="stSidebar"] h3 {
-        color: #FFFFFF !important; font-weight: 800 !important;
+        color: #F8FAFC !important; font-weight: 800 !important;
     }
     section[data-testid="stSidebar"] .stTextInput input,
     section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
-        background-color: #1E293B !important; color: #F8FAFC !important;
-        border-radius: 8px !important; border: 1px solid #334155 !important;
+        background-color: #16213A !important; color: #F1F5F9 !important;
+        border-radius: 8px !important; border: 1px solid #2A3752 !important;
     }
 
     section[data-testid="stSidebar"] .stTextInput input {
-        color: #F8FAFC !important;
-        -webkit-text-fill-color: #F8FAFC !important;
-        caret-color: #F8FAFC !important;
+        color: #F1F5F9 !important;
+        -webkit-text-fill-color: #F1F5F9 !important;
+        caret-color: #F1F5F9 !important;
         opacity: 1 !important;
     }
     section[data-testid="stSidebar"] .stTextInput input::placeholder {
-        color: #94A3B8 !important;
-        -webkit-text-fill-color: #94A3B8 !important;
+        color: #64748B !important;
+        -webkit-text-fill-color: #64748B !important;
         opacity: 1 !important;
     }
 
+    /* Radio buttons da sidebar (deixa de ser vermelho, vira índigo) */
+    section[data-testid="stSidebar"] .stRadio label span[data-baseweb="radio"] div:first-child {
+        border-color: #6366F1 !important;
+    }
+    section[data-testid="stSidebar"] .stRadio label span[data-baseweb="radio"] div div {
+        background-color: #6366F1 !important;
+    }
+
     section[data-testid="stSidebar"] .stButton button {
-        background: linear-gradient(135deg, #2563EB, #1D4ED8); color: #FFFFFF !important;
+        background: linear-gradient(135deg, #4338CA, #3730A3); color: #FFFFFF !important;
         font-weight: 700; border-radius: 10px; border: none; padding: 10px 0;
         width: 100%; transition: all 0.2s ease;
     }
     section[data-testid="stSidebar"] .stButton button:hover {
-        background: linear-gradient(135deg, #1D4ED8, #1E40AF); transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+        background: linear-gradient(135deg, #3730A3, #312E81); transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(67, 56, 202, 0.45);
     }
 
     .card-wrapper {
@@ -116,6 +127,17 @@ st.markdown("""
     div[data-testid="stHorizontalBlock"]:has(.foto-frame:hover) {
         z-index: 9000 !important;
     }
+    /* O ponto principal: eleva o CARTÃO exato (não só a coluna) acima de
+    todos os outros cartões, inclusive os que vêm depois dele na mesma
+    coluna — era isso que ficava por cima da foto ampliada. */
+    div[data-testid="element-container"]:has(.foto-frame:hover) {
+        position: relative;
+        z-index: 9500 !important;
+    }
+    .card-wrapper:has(.foto-frame:hover) {
+        position: relative;
+        z-index: 9500 !important;
+    }
 
     .foto-indisponivel {
         height: 220px; width: 100%; display: flex; align-items: center;
@@ -128,11 +150,12 @@ st.markdown("""
         background-color: #F8FAFC; padding: 14px 16px; border-top: 1px solid #E2E8F0;
         font-size: 13.5px; line-height: 1.7; border-radius: 0 0 14px 14px;
     }
-    .card-info .linha { display: flex; justify-content: space-between; color: #334155; }
-    .card-info .linha b { color: #0F172A; font-weight: 700; }
+    .card-info .linha { display: flex; justify-content: space-between; color: #475569; }
+    .card-info .linha span { color: #64748B; }
+    .card-info .linha b { color: #1E1B4B; font-weight: 700; }
 
     .contador-resultados {
-        font-size: 15px; font-weight: 700; color: #1E293B; margin-bottom: 16px;
+        font-size: 15px; font-weight: 700; color: #312E81; margin-bottom: 16px;
     }
 
     /* ---- LIGHTBOX (foto ampliada + botão de baixar), 100% CSS ---- */
@@ -161,11 +184,11 @@ st.markdown("""
     }
     .lightbox-close:hover { background: rgba(255,255,255,0.25); }
     .lightbox-download {
-        background: linear-gradient(135deg, #2563EB, #1D4ED8); color: #FFFFFF !important;
+        background: linear-gradient(135deg, #4338CA, #3730A3); color: #FFFFFF !important;
         padding: 12px 28px; border-radius: 10px; text-decoration: none;
-        font-weight: 700; font-size: 14px; box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4);
+        font-weight: 700; font-size: 14px; box-shadow: 0 6px 18px rgba(67, 56, 202, 0.4);
     }
-    .lightbox-download:hover { background: linear-gradient(135deg, #1D4ED8, #1E40AF); }
+    .lightbox-download:hover { background: linear-gradient(135deg, #3730A3, #312E81); }
     </style>
 """, unsafe_allow_html=True)
 
