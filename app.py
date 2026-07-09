@@ -97,6 +97,31 @@ st.markdown("""
         background-color: #818CF8 !important;
     }
 
+    /* Os widgets de câmera e upload têm fundo CLARO próprio (não é a
+    sidebar escura) — então o texto deles precisa ser ESCURO, não claro.
+    Isso sobrescreve, só para esses dois componentes, a regra geral que
+    deixa o texto da sidebar claro. */
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"],
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] *,
+    section[data-testid="stSidebar"] div[data-testid="stCameraInput"],
+    section[data-testid="stSidebar"] div[data-testid="stCameraInput"] * {
+        color: #1E293B !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] section,
+    section[data-testid="stSidebar"] div[data-testid="stCameraInput"] > div {
+        background-color: #F8FAFC !important;
+        border: 1px solid #CBD5E1 !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] button,
+    section[data-testid="stSidebar"] div[data-testid="stCameraInput"] button {
+        background-color: #FFFFFF !important; color: #1E293B !important;
+        border: 1px solid #CBD5E1 !important; font-weight: 600 !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stFileUploader"] small,
+    section[data-testid="stSidebar"] div[data-testid="stCameraInput"] small {
+        color: #64748B !important;
+    }
+
     section[data-testid="stSidebar"] .stCaption,
     section[data-testid="stSidebar"] .stCaption p,
     section[data-testid="stSidebar"] [data-testid="stCaptionContainer"] p {
@@ -193,31 +218,34 @@ st.markdown("""
         font-size: 15px; font-weight: 700; color: #312E81; margin-bottom: 16px;
     }
 
-    /* ---- LIGHTBOX (foto ampliada + botão de baixar), 100% CSS ---- */
+    /* ---- LIGHTBOX (foto em tela cheia + botão de baixar), 100% CSS ---- */
     .lightbox-overlay {
         display: none;
-        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-        background: rgba(15, 23, 42, 0.92);
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(11, 17, 32, 0.96);
         z-index: 99999;
         align-items: center; justify-content: center; flex-direction: column;
-        padding: 24px; box-sizing: border-box;
+        padding: 0; margin: 0; box-sizing: border-box;
     }
     .lightbox-overlay:target { display: flex; }
     .lightbox-content {
-        display: flex; flex-direction: column; align-items: center; gap: 18px;
-        max-width: 92vw; max-height: 90vh;
+        display: flex; flex-direction: column; align-items: center; gap: 20px;
+        width: 100%; height: 100%; justify-content: center; padding: 20px;
+        box-sizing: border-box;
     }
     .lightbox-content img {
-        max-width: 90vw; max-height: 72vh; border-radius: 12px; object-fit: contain;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55); background: #fff;
+        max-width: 96vw; max-height: 84vh; width: auto; height: auto;
+        border-radius: 8px; object-fit: contain;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); background: #fff;
     }
     .lightbox-close {
-        position: absolute; top: 20px; right: 28px; color: #FFFFFF;
+        position: fixed; top: 22px; right: 30px; color: #FFFFFF;
         font-size: 30px; font-weight: 800; text-decoration: none; line-height: 1;
-        background: rgba(255,255,255,0.12); width: 42px; height: 42px;
+        background: rgba(255,255,255,0.14); width: 44px; height: 44px;
         border-radius: 50%; display: flex; align-items: center; justify-content: center;
+        z-index: 100000;
     }
-    .lightbox-close:hover { background: rgba(255,255,255,0.25); }
+    .lightbox-close:hover { background: rgba(255,255,255,0.28); }
     .lightbox-download {
         background: linear-gradient(135deg, #4338CA, #3730A3); color: #FFFFFF !important;
         padding: 12px 28px; border-radius: 10px; text-decoration: none;
