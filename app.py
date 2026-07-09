@@ -94,12 +94,28 @@ st.markdown("""
         object-fit: contain; object-position: center center; display: block;
         margin: 0 auto; cursor: zoom-in; transition: transform 0.3s ease;
     }
-    .foto-frame:hover { overflow: visible; z-index: 200; }
+    .foto-frame:hover { overflow: visible; z-index: 9000; }
     .foto-frame:hover img {
         transform: scale(2.2); box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
         border-radius: 10px; background-color: #FFFFFF;
     }
-    div[data-testid="column"]:has(.foto-frame:hover) { position: relative; z-index: 200; }
+
+    /* ---- CORREÇÃO DE Z-INDEX / OVERFLOW: o zoom precisa ficar por cima
+    dos containers do Streamlit (colunas / blocos), não só do card. ---- */
+    div[data-testid="stHorizontalBlock"],
+    div[data-testid="column"],
+    div[data-testid="stVerticalBlock"],
+    div[data-testid="stVerticalBlockBorderWrapper"],
+    div[data-testid="element-container"] {
+        overflow: visible !important;
+    }
+    div[data-testid="column"]:has(.foto-frame:hover) {
+        position: relative;
+        z-index: 9000 !important;
+    }
+    div[data-testid="stHorizontalBlock"]:has(.foto-frame:hover) {
+        z-index: 9000 !important;
+    }
 
     .foto-indisponivel {
         height: 220px; width: 100%; display: flex; align-items: center;
@@ -118,6 +134,38 @@ st.markdown("""
     .contador-resultados {
         font-size: 15px; font-weight: 700; color: #1E293B; margin-bottom: 16px;
     }
+
+    /* ---- LIGHTBOX (foto ampliada + botão de baixar), 100% CSS ---- */
+    .lightbox-overlay {
+        display: none;
+        position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+        background: rgba(15, 23, 42, 0.92);
+        z-index: 99999;
+        align-items: center; justify-content: center; flex-direction: column;
+        padding: 24px; box-sizing: border-box;
+    }
+    .lightbox-overlay:target { display: flex; }
+    .lightbox-content {
+        display: flex; flex-direction: column; align-items: center; gap: 18px;
+        max-width: 92vw; max-height: 90vh;
+    }
+    .lightbox-content img {
+        max-width: 90vw; max-height: 72vh; border-radius: 12px; object-fit: contain;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55); background: #fff;
+    }
+    .lightbox-close {
+        position: absolute; top: 20px; right: 28px; color: #FFFFFF;
+        font-size: 30px; font-weight: 800; text-decoration: none; line-height: 1;
+        background: rgba(255,255,255,0.12); width: 42px; height: 42px;
+        border-radius: 50%; display: flex; align-items: center; justify-content: center;
+    }
+    .lightbox-close:hover { background: rgba(255,255,255,0.25); }
+    .lightbox-download {
+        background: linear-gradient(135deg, #2563EB, #1D4ED8); color: #FFFFFF !important;
+        padding: 12px 28px; border-radius: 10px; text-decoration: none;
+        font-weight: 700; font-size: 14px; box-shadow: 0 6px 18px rgba(37, 99, 235, 0.4);
+    }
+    .lightbox-download:hover { background: linear-gradient(135deg, #1D4ED8, #1E40AF); }
     </style>
 """, unsafe_allow_html=True)
 
@@ -143,6 +191,11 @@ def montar_url_drive(valor: str) -> str:
     file_id = extrair_id_drive(valor)
     return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
 
+def slug(valor: str) -> str:
+    """Deixa o texto seguro para usar em nome de arquivo / id de HTML."""
+    valor = str(valor or "item")
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", valor).strip("_") or "item"
+
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=3000)
 def obter_bytes_imagem(valor):
     if valor is None or valor == "PENDENTE_UPLOAD_DRIVE": raise ValueError("Sem imagem")
@@ -166,6 +219,12 @@ origem = st.sidebar.radio("Selecione o método:", ["Tirar Foto (Celular/PC)", "S
 foto_com_dados = None
 if origem == "Tirar Foto (Celular/PC)":
     foto_com_dados = st.sidebar.camera_input("Aponte a câmera para o componente", key=f"camera_{key_suffix}")
+    st.sidebar.caption(
+        "⚠️ Se a câmera não aparecer: o navegador precisa da sua permissão. "
+        "Clique no ícone de cadeado/câmera na barra de endereço e escolha "
+        "'Permitir'. Isso só funciona em endereços com HTTPS (o Streamlit "
+        "Cloud já usa HTTPS por padrão)."
+    )
 else:
     foto_com_dados = st.sidebar.file_uploader("Escolha a imagem", type=["jpg", "jpeg", "png", "webp"], key=f"upload_{key_suffix}")
 
@@ -220,14 +279,42 @@ try:
         colunas_mosaico = st.columns(4)
         for idx, Server_linha in df_filtrado.reset_index().iterrows():
             with colunas_mosaico[idx % 4]:
+                # id único para essa foto (usado pelo lightbox em #target)
+                lb_id = f"lb_{idx}_{slug(Server_linha['Código'])}"
+                nome_arquivo = f"{slug(Server_linha['Série'])}_{slug(Server_linha['Código'])}.jpg"
+
                 try:
                     b = obter_bytes_imagem(Server_linha['Imagem'])
                     img_b64 = base64.b64encode(b).decode('utf-8')
-                    html_foto = f'<div class="foto-frame"><img src="data:image/jpeg;base64,{img_b64}"></div>'
-                except:
+                    data_uri = f"data:image/jpeg;base64,{img_b64}"
+
+                    # Clique na foto -> abre o lightbox (via #id, sem JS).
+                    # Dentro do lightbox: foto grande + botão para baixar.
+                    html_foto = f'''
+                        <a href="#{lb_id}" class="foto-frame">
+                            <img src="{data_uri}">
+                        </a>
+                        <div class="lightbox-overlay" id="{lb_id}">
+                            <a href="#" class="lightbox-close" title="Fechar">✕</a>
+                            <div class="lightbox-content">
+                                <img src="{data_uri}">
+                                <a href="{data_uri}" download="{nome_arquivo}" class="lightbox-download">⬇️ Baixar Foto</a>
+                            </div>
+                        </div>
+                    '''
+                except Exception:
                     html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.</div>'
-                st.markdown(f'<div class="card-wrapper">{html_foto}<div class="card-info"><div class="linha"><span>Série</span><b>{Server_linha["Série"]}</b></div><div class="linha"><span>Modelo</span><b>{Server_linha["Modelo"]}</b></div><div class="linha"><span>Ambiente</span><b>{Server_linha["Ambiente"]}</b></div><div class="linha"><span>Código</span><b>{Server_linha["Código"]}</b></div></div></div>', unsafe_allow_html=True)
+
+                st.markdown(
+                    f'<div class="card-wrapper">{html_foto}<div class="card-info">'
+                    f'<div class="linha"><span>Série</span><b>{Server_linha["Série"]}</b></div>'
+                    f'<div class="linha"><span>Modelo</span><b>{Server_linha["Modelo"]}</b></div>'
+                    f'<div class="linha"><span>Ambiente</span><b>{Server_linha["Ambiente"]}</b></div>'
+                    f'<div class="linha"><span>Código</span><b>{Server_linha["Código"]}</b></div>'
+                    f'</div></div>',
+                    unsafe_allow_html=True
+                )
     else:
         st.info("💡 Nenhum item encontrado.")
-except:
+except Exception:
     st.info("💡 Planilha aguardando dados.")
