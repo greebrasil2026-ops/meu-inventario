@@ -157,23 +157,13 @@ st.markdown("""
     .foto-frame img {
         max-height: 220px; max-width: 100%; width: auto; height: auto;
         object-fit: contain; object-position: center center; display: block;
-        margin: 0 auto; transition: transform 0.3s ease;
+        margin: 0 auto; transition: transform 0.3s ease; cursor: pointer;
     }
     .foto-frame:hover { overflow: visible; z-index: 9000; }
     .foto-frame:hover img {
         transform: scale(2.2); box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
         border-radius: 10px; background-color: #FFFFFF;
     }
-
-    /* Botãozinho de expandir, no canto superior direito da foto */
-    .expand-btn {
-        position: absolute; top: 8px; right: 8px; width: 26px; height: 26px;
-        background-color: rgba(15, 23, 42, 0.65); color: #FFFFFF !important;
-        border-radius: 6px; display: flex; align-items: center; justify-content: center;
-        font-size: 13px; text-decoration: none; z-index: 20; line-height: 1;
-        transition: background-color 0.15s ease, transform 0.15s ease;
-    }
-    .expand-btn:hover { background-color: #4338CA; transform: scale(1.08); }
 
     /* ---- CORREÇÃO DE Z-INDEX / OVERFLOW: o zoom precisa ficar por cima
     dos containers do Streamlit (colunas / blocos), não só do card. ---- */
@@ -228,56 +218,6 @@ st.markdown("""
         font-size: 15px; font-weight: 700; color: #312E81; margin-bottom: 16px;
     }
 
-    /* Impede que containers do Streamlit "prendam" a janela ampliada
-    (position: fixed) dentro deles — isso acontecia quando algum ancestral
-    tinha transform/contain aplicado, fazendo o "tela cheia" ficar preso
-    atrás de outros cartões. */
-    div[data-testid="stAppViewContainer"],
-    div[data-testid="stMain"],
-    section.main,
-    div[data-testid="block-container"],
-    div[data-testid="element-container"]:has(.lightbox-overlay) {
-        transform: none !important;
-        filter: none !important;
-        contain: none !important;
-        perspective: none !important;
-        will-change: auto !important;
-    }
-
-    /* ---- LIGHTBOX (foto em tela cheia + botão de baixar), 100% CSS ---- */
-    .lightbox-overlay {
-        display: none;
-        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-        background: rgba(11, 17, 32, 0.96);
-        z-index: 99999;
-        align-items: center; justify-content: center; flex-direction: column;
-        padding: 0; margin: 0; box-sizing: border-box;
-    }
-    .lightbox-overlay:target { display: flex; }
-    .lightbox-content {
-        display: flex; flex-direction: column; align-items: center; gap: 20px;
-        width: 100%; height: 100%; justify-content: center; padding: 20px;
-        box-sizing: border-box;
-    }
-    .lightbox-content img {
-        max-width: 96vw; max-height: 84vh; width: auto; height: auto;
-        border-radius: 8px; object-fit: contain;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6); background: #fff;
-    }
-    .lightbox-close {
-        position: fixed; top: 22px; right: 30px; color: #FFFFFF;
-        font-size: 30px; font-weight: 800; text-decoration: none; line-height: 1;
-        background: rgba(255,255,255,0.14); width: 44px; height: 44px;
-        border-radius: 50%; display: flex; align-items: center; justify-content: center;
-        z-index: 100000;
-    }
-    .lightbox-close:hover { background: rgba(255,255,255,0.28); }
-    .lightbox-download {
-        background: linear-gradient(135deg, #4338CA, #3730A3); color: #FFFFFF !important;
-        padding: 12px 28px; border-radius: 10px; text-decoration: none;
-        font-weight: 700; font-size: 14px; box-shadow: 0 6px 18px rgba(67, 56, 202, 0.4);
-    }
-    .lightbox-download:hover { background: linear-gradient(135deg, #3730A3, #312E81); }
     </style>
 """, unsafe_allow_html=True)
 
@@ -389,11 +329,8 @@ try:
 
     if not df_filtrado.empty:
         colunas_mosaico = st.columns(4)
-        lightboxes_html = []  # todas as janelas ampliadas, renderizadas fora das colunas
         for idx, Server_linha in df_filtrado.reset_index().iterrows():
             with colunas_mosaico[idx % 4]:
-                # id único para essa foto (usado pelo lightbox em #target)
-                lb_id = f"lb_{idx}_{slug(Server_linha['Código'])}"
                 nome_arquivo = f"{slug(Server_linha['Série'])}_{slug(Server_linha['Código'])}.jpg"
 
                 try:
@@ -401,28 +338,14 @@ try:
                     img_b64 = base64.b64encode(b).decode('utf-8')
                     data_uri = f"data:image/jpeg;base64,{img_b64}"
 
-                    # A foto em si não abre mais nada ao clicar (só dá zoom
-                    # no hover). O botãozinho no canto abre o lightbox com
-                    # a opção de baixar.
+                    # Clicar na foto baixa a imagem direto (sem abrir nada).
                     html_foto = f'''
                         <div class="foto-frame">
-                            <img src="{data_uri}">
-                            <a href="#{lb_id}" class="expand-btn" title="Expandir foto">⤢</a>
+                            <a href="{data_uri}" download="{nome_arquivo}" title="Clique para baixar a foto">
+                                <img src="{data_uri}">
+                            </a>
                         </div>
                     '''
-                    # A janela ampliada (lightbox) NÃO fica dentro do cartão/
-                    # coluna — se ficasse, o Streamlit "prende" o position:fixed
-                    # dentro do cartão e ela aparece atrás de outros itens.
-                    # Por isso é guardada e renderizada solta, fora de tudo.
-                    lightboxes_html.append(f'''
-                        <div class="lightbox-overlay" id="{lb_id}">
-                            <a href="#" class="lightbox-close" title="Fechar">✕</a>
-                            <div class="lightbox-content">
-                                <img src="{data_uri}">
-                                <a href="{data_uri}" download="{nome_arquivo}" class="lightbox-download">⬇️ Baixar Foto</a>
-                            </div>
-                        </div>
-                    ''')
                 except Exception:
                     html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.</div>'
 
@@ -435,11 +358,6 @@ try:
                     f'</div></div>',
                     unsafe_allow_html=True
                 )
-        # Renderiza todas as janelas ampliadas de uma vez, soltas no final,
-        # fora da estrutura de colunas — assim elas realmente ficam por
-        # cima de tudo quando abertas.
-        if lightboxes_html:
-            st.markdown("".join(lightboxes_html), unsafe_allow_html=True)
     else:
         st.info("💡 Nenhum item encontrado.")
 except Exception:
