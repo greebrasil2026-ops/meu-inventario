@@ -145,41 +145,43 @@ def extrair_id_drive(valor: str):
     m = PADRAO_ID_DRIVE.search(valor)
     return m.group(0) if m else valor
 
-def resolver_imagem(valor):
-    """Recebe o valor bruto da célula 'Imagem' e devolve algo que o
-    st.image() consegue renderizar (data URI ou URL http)."""
-    if valor is None:
-        return None
-    valor = str(valor).strip()
-    if not valor:
-        return None
-
-    # Caso 1: já é uma imagem em base64
-    if valor.startswith("data:image"):
-        return valor
-
-    # Caso 2: já é uma URL http(s)
-    if valor.startswith("http://") or valor.startswith("https://"):
-        if "drive.google.com" in valor:
-            file_id = extrair_id_drive(valor)
-            return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
-        return valor
-
-    # Caso 3: string "solta" -> tratamos como ID de arquivo do Drive
+def montar_url_drive(valor: str) -> str:
+    """Monta a URL de thumbnail do Drive a partir de um link ou ID."""
     file_id = extrair_id_drive(valor)
     return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
 
-def baixar_bytes_imagem(valor):
-    """Devolve os bytes da imagem para o botão de download,
-    seja ela base64 ou hospedada no Drive."""
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=3000)
+def obter_bytes_imagem(valor):
+    """Devolve os BYTES da imagem (não uma URL). Buscamos os bytes aqui,
+    no servidor, com `requests` (sem cabeçalho de Referer de navegador),
+    porque o Google Drive costuma bloquear/errar quando o <img src="...">
+    tenta carregar o arquivo diretamente do navegador (hotlink), mesmo
+    quando o arquivo está compartilhado publicamente. Buscando aqui e
+    entregando os bytes prontos pro st.image(), evitamos esse bloqueio.
+    Resultado é cacheado por valor (ID/URL) para não rebuscar a cada rerun.
+    """
+    if valor is None:
+        raise ValueError("Sem imagem")
     valor = str(valor).strip()
+    if not valor:
+        raise ValueError("Sem imagem")
+
+    # Caso 1: já é uma imagem em base64
     if valor.startswith("data:image"):
         return base64.b64decode(valor.split(",")[1])
 
-    url = resolver_imagem(valor)
+    # Caso 2 e 3: link do Drive ou ID puro -> busca via requests no servidor
+    url = montar_url_drive(valor)
     resposta = requests.get(url, timeout=20)
     resposta.raise_for_status()
-    return resposta.content
+    conteudo = resposta.content
+    # O Drive às vezes responde 200 com uma página HTML de erro/aviso em
+    # vez da imagem (arquivo não compartilhado, por exemplo). Detectamos
+    # isso checando se realmente veio uma imagem.
+    tipo = resposta.headers.get("Content-Type", "")
+    if "image" not in tipo:
+        raise ValueError("Drive não retornou uma imagem (verifique o compartilhamento do arquivo)")
+    return conteudo
 
 
 # --- CONTROLE DE LIMPEZA AUTOMÁTICA DO FORMULÁRIO ---
@@ -288,14 +290,12 @@ if not df_dados.empty:
             with coluna_da_vez:
                 st.markdown('<div class="card-wrapper">', unsafe_allow_html=True)
 
-                url_imagem = resolver_imagem(Server_linha['Imagem'])
-                if url_imagem:
-                    try:
-                        st.image(url_imagem)
-                    except Exception:
-                        st.warning("⚠️ Não foi possível carregar esta imagem. Verifique se o arquivo no Drive está compartilhado como 'Qualquer pessoa com o link'.")
-                else:
-                    st.info("Sem imagem cadastrada.")
+                bytes_imagem = None
+                try:
+                    bytes_imagem = obter_bytes_imagem(Server_linha['Imagem'])
+                    st.image(bytes_imagem)
+                except Exception:
+                    st.warning("⚠️ Imagem indisponível. Verifique se o arquivo no Drive está compartilhado como 'Qualquer pessoa com o link'.")
 
                 st.markdown(f"""
                     <div class="card-info">
@@ -307,18 +307,15 @@ if not df_dados.empty:
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
 
-                try:
-                    dados_binarios = baixar_bytes_imagem(Server_linha['Imagem'])
+                if bytes_imagem is not None:
                     st.download_button(
                         label="📥 Baixar Foto",
-                        data=dados_binarios,
+                        data=bytes_imagem,
                         file_name=f"{Server_linha['Série']}_{Server_linha['Modelo']}_{Server_linha['Código']}.jpg",
                         mime="image/jpeg",
                         key=f"btn_dl_{idx}",
                         use_container_width=True
                     )
-                except Exception:
-                    pass
     else:
         st.info("💡 Nenhuma foto corresponde aos filtros aplicados.")
 else:
