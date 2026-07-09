@@ -157,13 +157,23 @@ st.markdown("""
     .foto-frame img {
         max-height: 220px; max-width: 100%; width: auto; height: auto;
         object-fit: contain; object-position: center center; display: block;
-        margin: 0 auto; cursor: zoom-in; transition: transform 0.3s ease;
+        margin: 0 auto; transition: transform 0.3s ease;
     }
     .foto-frame:hover { overflow: visible; z-index: 9000; }
     .foto-frame:hover img {
         transform: scale(2.2); box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
         border-radius: 10px; background-color: #FFFFFF;
     }
+
+    /* Botãozinho de expandir, no canto superior direito da foto */
+    .expand-btn {
+        position: absolute; top: 8px; right: 8px; width: 26px; height: 26px;
+        background-color: rgba(15, 23, 42, 0.65); color: #FFFFFF !important;
+        border-radius: 6px; display: flex; align-items: center; justify-content: center;
+        font-size: 13px; text-decoration: none; z-index: 20; line-height: 1;
+        transition: background-color 0.15s ease, transform 0.15s ease;
+    }
+    .expand-btn:hover { background-color: #4338CA; transform: scale(1.08); }
 
     /* ---- CORREÇÃO DE Z-INDEX / OVERFLOW: o zoom precisa ficar por cima
     dos containers do Streamlit (colunas / blocos), não só do card. ---- */
@@ -374,12 +384,14 @@ try:
                     img_b64 = base64.b64encode(b).decode('utf-8')
                     data_uri = f"data:image/jpeg;base64,{img_b64}"
 
-                    # Clique na foto -> abre o lightbox (via #id, sem JS).
-                    # Dentro do lightbox: foto grande + botão para baixar.
+                    # A foto em si não abre mais nada ao clicar (só dá zoom
+                    # no hover). O botãozinho no canto abre o lightbox com
+                    # a opção de baixar.
                     html_foto = f'''
-                        <a href="#{lb_id}" class="foto-frame">
+                        <div class="foto-frame">
                             <img src="{data_uri}">
-                        </a>
+                            <a href="#{lb_id}" class="expand-btn" title="Expandir foto">⤢</a>
+                        </div>
                         <div class="lightbox-overlay" id="{lb_id}">
                             <a href="#" class="lightbox-close" title="Fechar">✕</a>
                             <div class="lightbox-content">
