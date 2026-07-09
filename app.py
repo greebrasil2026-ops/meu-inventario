@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
 import base64
-import json
 import requests
+from streamlit_gsheets import GSheetsConnection
 
+# Configuração da página
 st.set_page_config(page_title="Sistema de Catalogação", layout="wide")
 
 st.markdown("""
     <style>
-    .assinatura { font-size: 13px; font-weight: 800; color: #1E3A8A; text-transform: uppercase; border-bottom: 2px solid #3B82F6; padding-bottom: 2px; margin-bottom: 15px; }
     .card-info { background-color: #F8FAFC; padding: 12px; border-radius: 0 0 12px 12px; border: 1px solid #E2E8F0; border-top: none; font-size: 13.5px; }
     [data-testid="stImage"] img { border-radius: 12px 12px 0 0; object-fit: cover; height: 230px !important; width: 100%; }
     </style>
@@ -16,16 +16,22 @@ st.markdown("""
 
 st.title("📦 Sistema de Catalogação e Inventário")
 
-# Carrega os segredos de forma segura
+# --- CONEXÃO COM SECRET ---
+# Certifique-se de que no painel Secrets do Streamlit Cloud você tenha:
+# [connections.gsheets]
+# spreadsheet = "SEU_ID_DA_PLANILHA"
+#
+# [connections]
+# google_script_url = "SUA_URL_DO_WEB_APP"
+
 try:
     URL_PLANILHA = st.secrets["connections"]["google_script_url"]
-except KeyError:
-    st.error("ERRO: 'google_script_url' não encontrado nos Secrets.")
+except:
+    st.error("Erro: A URL do Script não foi configurada nos Secrets.")
     URL_PLANILHA = None
 
 st.sidebar.header("📸 Adicionar Novo Item")
-origem = st.sidebar.radio("Selecione o método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"])
-
+origem = st.sidebar.radio("Método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria"])
 foto_com_dados = st.sidebar.camera_input("Aponte a câmera") if origem == "Tirar Foto (Celular/PC)" else st.sidebar.file_uploader("Escolha a imagem", type=["jpg", "png"])
 
 if foto_com_dados:
@@ -48,12 +54,12 @@ if foto_com_dados:
             except Exception as e:
                 st.sidebar.error(f"Falha na rede: {e}")
         else:
-            st.sidebar.warning("Preencha todos os campos e verifique os Secrets.")
+            st.sidebar.warning("Preencha todos os campos!")
 
-# Leitura da Planilha
+# --- LEITURA DA PLANILHA ---
 try:
-    conexao = st.connection("gsheets", type=st.connection.GSheetsConnection)
-    df = conexao.read(ttl=1)
+    conn = st.connection("gsheets", type=GSheetsConnection)
+    df = conn.read(ttl=1)
     if not df.empty:
         df.columns = ["Série", "Modelo", "Ambiente", "Código", "Imagem"]
         st.subheader("Itens Cadastrados")
@@ -63,4 +69,4 @@ try:
                 st.image(row['Imagem'])
                 st.markdown(f'<div class="card-info">Série: {row["Série"]}<br>Mod: {row["Modelo"]}</div>', unsafe_allow_html=True)
 except Exception as e:
-    st.warning(f"Atenção: Planilha não conectada. Verifique os Secrets no painel. Detalhe: {e}")
+    st.warning(f"Conexão com a planilha pendente. Detalhe: {e}")
