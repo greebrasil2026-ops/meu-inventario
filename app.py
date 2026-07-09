@@ -4,6 +4,7 @@ import pandas as pd
 import base64
 import json
 import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configuração da página para ocupar a tela inteira (layout wide para mosaico)
 st.set_page_config(page_title="Sistema de Catalogação Dinâmico", layout="wide", page_icon="📦")
@@ -138,10 +139,26 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(67, 56, 202, 0.45);
     }
 
+    /* Grid do mosaico renderizado como UM bloco HTML só (em vez de
+    N st.columns / N st.markdown), o que reduz muito o número de
+    componentes que o Streamlit precisa montar e mandar pro navegador. */
+    .mosaico-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 18px;
+        margin-top: 6px;
+    }
+    @media (max-width: 1200px) {
+        .mosaico-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 700px) {
+        .mosaico-grid { grid-template-columns: 1fr; }
+    }
+
     .card-wrapper {
         background-color: #FFFFFF; border-radius: 14px;
         border: 1px solid #E2E8F0; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
-        transition: transform 0.2s ease, box-shadow 0.2s ease; margin-bottom: 18px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
         position: relative;
     }
     .card-wrapper:hover {
@@ -158,40 +175,20 @@ st.markdown("""
         max-height: 220px; max-width: 100%; width: auto; height: auto;
         object-fit: contain; object-position: center center; display: block;
         margin: 0 auto; transition: transform 0.3s ease; cursor: pointer;
+        /* ajuda o navegador a não travar decodificando tudo de uma vez */
+        loading: lazy;
     }
-    .foto-frame:hover { overflow: visible; z-index: 9000; }
+    .foto-frame:hover { overflow: visible; z-index: 100; }
     .foto-frame:hover img {
         transform: scale(2.2); box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
         border-radius: 10px; background-color: #FFFFFF;
     }
 
-    /* ---- CORREÇÃO DE Z-INDEX / OVERFLOW: o zoom precisa ficar por cima
-    dos containers do Streamlit (colunas / blocos), não só do card. ---- */
-    div[data-testid="stHorizontalBlock"],
-    div[data-testid="column"],
-    div[data-testid="stVerticalBlock"],
-    div[data-testid="stVerticalBlockBorderWrapper"],
-    div[data-testid="element-container"] {
-        overflow: visible !important;
-    }
-    div[data-testid="column"]:has(.foto-frame:hover) {
-        position: relative;
-        z-index: 9000 !important;
-    }
-    div[data-testid="stHorizontalBlock"]:has(.foto-frame:hover) {
-        z-index: 9000 !important;
-    }
-    /* O ponto principal: eleva o CARTÃO exato (não só a coluna) acima de
-    todos os outros cartões, inclusive os que vêm depois dele na mesma
-    coluna — era isso que ficava por cima da foto ampliada. */
-    div[data-testid="element-container"]:has(.foto-frame:hover) {
-        position: relative;
-        z-index: 9500 !important;
-    }
-    .card-wrapper:has(.foto-frame:hover) {
-        position: relative;
-        z-index: 9500 !important;
-    }
+    /* Overflow visível para o zoom não cortar, e z-index para o card
+    em hover ficar por cima dos vizinhos. Como agora é um grid CSS puro
+    (não st.columns), isso fica bem mais simples e leve que antes. */
+    .mosaico-grid { overflow: visible; }
+    .card-wrapper:has(.foto-frame:hover) { z-index: 200; }
 
     /* Rótulos dos campos na área principal (Filtros de Busca) */
     div[data-testid="stTextInput"] label p,
@@ -243,15 +240,6 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- AUTENTICAÇÃO (usuário e senha) ---
-# As credenciais NÃO ficam no código: elas vêm dos "Secrets" do Streamlit
-# Cloud (App -> Settings -> Secrets), no formato:
-#
-# [auth]
-# [auth.usuarios]
-# admin = "sua_senha_aqui"
-# joao = "outra_senha"
-#
-# Assim o usuário/senha nunca aparece no GitHub, mesmo com o repo público.
 USUARIOS_VALIDOS = {}
 if "auth" in st.secrets and "usuarios" in st.secrets["auth"]:
     USUARIOS_VALIDOS = dict(st.secrets["auth"]["usuarios"])
@@ -284,7 +272,6 @@ if not st.session_state.autenticado:
     st.stop()  # impede que o resto do app (catálogo) seja renderizado
 
 
-
 st.markdown('<div class="assinatura">Desenvolvido por Zellic Araújo</div>', unsafe_allow_html=True)
 st.markdown("""
     <div class="header-box">
@@ -303,28 +290,42 @@ def extrair_id_drive(valor: str):
     m = PADRAO_ID_DRIVE.search(valor)
     return m.group(0) if m else valor
 
-def montar_url_drive(valor: str) -> str:
+# OTIMIZAÇÃO 1: o thumbnail do Drive era pedido em w1000 (imagem enorme)
+# para ser exibido num quadro de 220px de altura. Isso multiplicava por
+# ~5x o tamanho de cada imagem baixada e o tempo de decodificação no
+# navegador, sem nenhum ganho visual. w400 já é mais que suficiente
+# mesmo com o zoom de hover (2.2x de 220px ≈ 484px).
+def montar_url_drive(valor: str, tamanho: int = 400) -> str:
     file_id = extrair_id_drive(valor)
-    return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
+    return f"https://drive.google.com/thumbnail?id={file_id}&sz=w{tamanho}"
 
 def slug(valor: str) -> str:
     """Deixa o texto seguro para usar em nome de arquivo / id de HTML."""
     valor = str(valor or "item")
     return re.sub(r"[^A-Za-z0-9_-]+", "_", valor).strip("_") or "item"
 
-@st.cache_data(show_spinner=False, ttl=3600, max_entries=3000)
-def obter_bytes_imagem(valor):
-    if valor is None or valor == "PENDENTE_UPLOAD_DRIVE": raise ValueError("Sem imagem")
+# OTIMIZAÇÃO 2: cacheia direto a data-URI (base64) já pronta para
+# inserir no <img src="...">, em vez de cachear só os bytes e refazer
+# o base64.b64encode(...) a cada rerun do Streamlit (isso rodava de
+# novo pra CADA item, em CADA interação do usuário, mesmo com cache).
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=1000)
+def obter_data_uri_imagem(valor):
+    if valor is None or valor == "PENDENTE_UPLOAD_DRIVE":
+        raise ValueError("Sem imagem")
     valor = str(valor).strip()
-    if not valor: raise ValueError("Sem imagem")
-    if valor.startswith("data:image"): return base64.b64decode(valor.split(",")[1])
+    if not valor:
+        raise ValueError("Sem imagem")
+    if valor.startswith("data:image"):
+        return valor
     url = montar_url_drive(valor)
     resposta = requests.get(url, timeout=20)
     resposta.raise_for_status()
     conteudo = resposta.content
     tipo = resposta.headers.get("Content-Type", "")
-    if "image" not in tipo: raise ValueError("Drive não retornou uma imagem")
-    return conteudo
+    if "image" not in tipo:
+        raise ValueError("Drive não retornou uma imagem")
+    b64 = base64.b64encode(conteudo).decode("utf-8")
+    return f"data:image/jpeg;base64,{b64}"
 
 if "form_counter" not in st.session_state: st.session_state.form_counter = 0
 key_suffix = st.session_state.form_counter
@@ -389,7 +390,19 @@ with st.container(border=True):
 
 try:
     from streamlit_gsheets import GSheetsConnection
-    df_dados = st.connection("gsheets", type=GSheetsConnection).read(ttl="5s")
+
+    # OTIMIZAÇÃO 3: ttl="5s" fazia o app reler a planilha inteira do
+    # Google Sheets a cada 5 segundos em qualquer interação (digitar um
+    # filtro, mudar de página, etc). 60s já é suficiente pra um catálogo
+    # de inventário e reduz muito as chamadas de rede. Some um botão de
+    # "atualizar agora" pra quando o usuário realmente precisar do dado
+    # mais recente na hora.
+    col_titulo, col_refresh = st.columns([6, 1])
+    with col_refresh:
+        forcar_refresh = st.button("🔄 Atualizar", use_container_width=True)
+
+    ttl_planilha = "0s" if forcar_refresh else "60s"
+    df_dados = st.connection("gsheets", type=GSheetsConnection).read(ttl=ttl_planilha)
     df_dados.columns = ["Série", "Modelo", "Ambiente", "Código", "Imagem"]
     df_filtrado = df_dados.copy()
     if busca_s: df_filtrado = df_filtrado[df_filtrado['Série'].str.upper().str.contains(busca_s, na=False)]
@@ -397,37 +410,93 @@ try:
     if busca_a != "Todos": df_filtrado = df_filtrado[df_filtrado['Ambiente'] == busca_a]
     if busca_c: df_filtrado = df_filtrado[df_filtrado['Código'].astype(str).str.contains(busca_c, na=False)]
 
-    if not df_filtrado.empty:
-        colunas_mosaico = st.columns(4)
-        for idx, Server_linha in df_filtrado.reset_index().iterrows():
-            with colunas_mosaico[idx % 4]:
-                nome_arquivo = f"{slug(Server_linha['Série'])}_{slug(Server_linha['Código'])}.jpg"
+    total_itens = len(df_filtrado)
 
-                try:
-                    b = obter_bytes_imagem(Server_linha['Imagem'])
-                    img_b64 = base64.b64encode(b).decode('utf-8')
-                    data_uri = f"data:image/jpeg;base64,{img_b64}"
+    if total_itens > 0:
+        # OTIMIZAÇÃO 4: paginação. Antes TODOS os itens filtrados eram
+        # renderizados de uma vez — com um catálogo grande isso significa
+        # dezenas/centenas de imagens em base64 embutidas na página ao
+        # mesmo tempo, o que deixa o carregamento e a rolagem pesados.
+        # Agora só a página atual é buscada e desenhada.
+        ITENS_POR_PAGINA = 20
+        total_paginas = max(1, (total_itens - 1) // ITENS_POR_PAGINA + 1)
 
-                    # Clicar na foto baixa a imagem direto (sem abrir nada).
-                    html_foto = f'''
-                        <div class="foto-frame">
-                            <a href="{data_uri}" download="{nome_arquivo}" title="Clique para baixar a foto">
-                                <img src="{data_uri}">
-                            </a>
-                        </div>
-                    '''
-                except Exception:
-                    html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.</div>'
+        if "pagina_atual" not in st.session_state:
+            st.session_state.pagina_atual = 1
+        # se o filtro mudou e a página ficou fora do intervalo, corrige
+        if st.session_state.pagina_atual > total_paginas:
+            st.session_state.pagina_atual = 1
 
-                st.markdown(
-                    f'<div class="card-wrapper">{html_foto}<div class="card-info">'
-                    f'<div class="linha"><span>Série</span><b>{Server_linha["Série"]}</b></div>'
-                    f'<div class="linha"><span>Modelo</span><b>{Server_linha["Modelo"]}</b></div>'
-                    f'<div class="linha"><span>Ambiente</span><b>{Server_linha["Ambiente"]}</b></div>'
-                    f'<div class="linha"><span>Código</span><b>{Server_linha["Código"]}</b></div>'
-                    f'</div></div>',
-                    unsafe_allow_html=True
+        col_contador, col_paginacao = st.columns([3, 2])
+        with col_contador:
+            st.markdown(
+                f'<div class="contador-resultados">📊 {total_itens} item(ns) encontrado(s)</div>',
+                unsafe_allow_html=True
+            )
+        with col_paginacao:
+            if total_paginas > 1:
+                st.session_state.pagina_atual = st.number_input(
+                    f"Página (1 a {total_paginas})",
+                    min_value=1, max_value=total_paginas,
+                    value=st.session_state.pagina_atual, step=1,
+                    label_visibility="collapsed"
                 )
+
+        inicio = (st.session_state.pagina_atual - 1) * ITENS_POR_PAGINA
+        fim = inicio + ITENS_POR_PAGINA
+        df_pagina = df_filtrado.reset_index(drop=True).iloc[inicio:fim]
+
+        # OTIMIZAÇÃO 5: busca as imagens da página em paralelo (só as
+        # ~20 da página atual, não do catálogo inteiro), o que acelera
+        # bastante quando várias ainda não estão em cache.
+        def carregar_linha(linha):
+            try:
+                data_uri = obter_data_uri_imagem(linha["Imagem"])
+                return (linha.name, data_uri, None)
+            except Exception as e:
+                return (linha.name, None, str(e))
+
+        resultados_imagens = {}
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futuros = [executor.submit(carregar_linha, linha) for _, linha in df_pagina.iterrows()]
+            for futuro in as_completed(futuros):
+                idx, data_uri, erro = futuro.result()
+                resultados_imagens[idx] = data_uri
+
+        # OTIMIZAÇÃO 6: monta o mosaico inteiro como UM único bloco HTML
+        # (grid CSS) e chama st.markdown() uma vez só, em vez de um
+        # st.columns()/st.markdown() por card. Isso reduz drasticamente
+        # o número de componentes que o Streamlit precisa criar e
+        # sincronizar com o navegador a cada renderização.
+        cards_html = []
+        for idx, linha in df_pagina.iterrows():
+            nome_arquivo = f"{slug(linha['Série'])}_{slug(linha['Código'])}.jpg"
+            data_uri = resultados_imagens.get(idx)
+
+            if data_uri:
+                html_foto = f'''
+                    <div class="foto-frame">
+                        <a href="{data_uri}" download="{nome_arquivo}" title="Clique para baixar a foto">
+                            <img src="{data_uri}" loading="lazy">
+                        </a>
+                    </div>
+                '''
+            else:
+                html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.</div>'
+
+            cards_html.append(
+                f'<div class="card-wrapper">{html_foto}<div class="card-info">'
+                f'<div class="linha"><span>Série</span><b>{linha["Série"]}</b></div>'
+                f'<div class="linha"><span>Modelo</span><b>{linha["Modelo"]}</b></div>'
+                f'<div class="linha"><span>Ambiente</span><b>{linha["Ambiente"]}</b></div>'
+                f'<div class="linha"><span>Código</span><b>{linha["Código"]}</b></div>'
+                f'</div></div>'
+            )
+
+        st.markdown(f'<div class="mosaico-grid">{"".join(cards_html)}</div>', unsafe_allow_html=True)
+
+        if total_paginas > 1:
+            st.caption(f"Página {st.session_state.pagina_atual} de {total_paginas}")
     else:
         st.info("💡 Nenhum item encontrado.")
 except Exception:
