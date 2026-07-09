@@ -228,6 +228,22 @@ st.markdown("""
         font-size: 15px; font-weight: 700; color: #312E81; margin-bottom: 16px;
     }
 
+    /* Impede que containers do Streamlit "prendam" a janela ampliada
+    (position: fixed) dentro deles — isso acontecia quando algum ancestral
+    tinha transform/contain aplicado, fazendo o "tela cheia" ficar preso
+    atrás de outros cartões. */
+    div[data-testid="stAppViewContainer"],
+    div[data-testid="stMain"],
+    section.main,
+    div[data-testid="block-container"],
+    div[data-testid="element-container"]:has(.lightbox-overlay) {
+        transform: none !important;
+        filter: none !important;
+        contain: none !important;
+        perspective: none !important;
+        will-change: auto !important;
+    }
+
     /* ---- LIGHTBOX (foto em tela cheia + botão de baixar), 100% CSS ---- */
     .lightbox-overlay {
         display: none;
@@ -373,6 +389,7 @@ try:
 
     if not df_filtrado.empty:
         colunas_mosaico = st.columns(4)
+        lightboxes_html = []  # todas as janelas ampliadas, renderizadas fora das colunas
         for idx, Server_linha in df_filtrado.reset_index().iterrows():
             with colunas_mosaico[idx % 4]:
                 # id único para essa foto (usado pelo lightbox em #target)
@@ -392,6 +409,12 @@ try:
                             <img src="{data_uri}">
                             <a href="#{lb_id}" class="expand-btn" title="Expandir foto">⤢</a>
                         </div>
+                    '''
+                    # A janela ampliada (lightbox) NÃO fica dentro do cartão/
+                    # coluna — se ficasse, o Streamlit "prende" o position:fixed
+                    # dentro do cartão e ela aparece atrás de outros itens.
+                    # Por isso é guardada e renderizada solta, fora de tudo.
+                    lightboxes_html.append(f'''
                         <div class="lightbox-overlay" id="{lb_id}">
                             <a href="#" class="lightbox-close" title="Fechar">✕</a>
                             <div class="lightbox-content">
@@ -399,7 +422,7 @@ try:
                                 <a href="{data_uri}" download="{nome_arquivo}" class="lightbox-download">⬇️ Baixar Foto</a>
                             </div>
                         </div>
-                    '''
+                    ''')
                 except Exception:
                     html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.</div>'
 
@@ -412,6 +435,11 @@ try:
                     f'</div></div>',
                     unsafe_allow_html=True
                 )
+        # Renderiza todas as janelas ampliadas de uma vez, soltas no final,
+        # fora da estrutura de colunas — assim elas realmente ficam por
+        # cima de tudo quando abertas.
+        if lightboxes_html:
+            st.markdown("".join(lightboxes_html), unsafe_allow_html=True)
     else:
         st.info("💡 Nenhum item encontrado.")
 except Exception:
