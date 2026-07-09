@@ -182,13 +182,35 @@ if foto_com_dados is not None:
 
     if st.sidebar.button("💾 Enviar Direto para o Sistema", key=f"btn_enviar_{key_suffix}"):
         if input_serie and input_modelo and input_codigo and URL_PLANILHA:
-            with st.spinner("Registrando dados..."):
+            with st.spinner("Enviando foto para o Drive..."):
+                # Captura os bytes da foto
+                bytes_imagem_envio = foto_com_dados.getvalue()
+                # Prepara o JSON para o Apps Script
                 dados_envio = {
                     "serie": input_serie,
                     "modelo": input_modelo,
                     "ambiente": input_ambiente,
                     "codigo": input_codigo,
-                    "imagem": "PENDENTE_UPLOAD_DRIVE"
+                    "filedata": base64.b64encode(bytes_imagem_envio).decode('utf-8'),
+                    "filename": f"{input_codigo}.jpg",
+                    "mimetype": "image/jpeg"
+                }
+
+                try:
+                    resposta = requests.post(
+                        URL_PLANILHA,
+                        data=json.dumps(dados_envio),
+                        headers={'Content-Type': 'application/json'},
+                        timeout=60 # Aumentamos o tempo para upload
+                    )
+                    if resposta.status_code == 200:
+                        st.sidebar.success("✅ Foto salva no Drive e registro criado!")
+                        st.session_state.form_counter += 1
+                        st.rerun()
+                    else:
+                        st.sidebar.error(f"⚠️ Erro ao salvar: {resposta.status_code}")
+                except Exception as e:
+                    st.sidebar.error(f"Erro de conexão: {e}")
                 }
                 try:
                     resposta = requests.post(URL_PLANILHA, data=json.dumps(dados_envio), headers={'Content-Type': 'application/json'}, timeout=30)
