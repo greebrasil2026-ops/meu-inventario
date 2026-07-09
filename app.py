@@ -36,14 +36,6 @@ st.markdown("""
         color: #DBEAFE; font-size: 14px; margin: 4px 0 0 0; font-weight: 500;
     }
 
-    /* Bloco de filtros */
-    .filtro-box {
-        background-color: #FFFFFF; padding: 20px 24px; border-radius: 14px;
-        border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-        margin-bottom: 24px;
-    }
-    .filtro-box h3 { font-size: 15px; font-weight: 700; color: #1E293B; margin: 0 0 12px 0; }
-
     /* Sidebar */
     section[data-testid="stSidebar"] {
         background-color: #0F172A;
@@ -67,6 +59,28 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
     }
 
+    /* Caixa de upload / câmera legível no tema escuro */
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"],
+    section[data-testid="stSidebar"] [data-testid="stCameraInput"] {
+        background-color: #1E293B !important;
+        border: 1.5px dashed #475569 !important;
+        border-radius: 10px !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] * {
+        color: #F1F5F9 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small,
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] span {
+        color: #94A3B8 !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
+        background-color: #334155 !important; color: #F1F5F9 !important;
+        border: 1px solid #475569 !important; border-radius: 8px !important;
+    }
+    section[data-testid="stSidebar"] [data-testid="stFileUploaderFile"] {
+        background-color: #1E293B !important; border-radius: 8px !important;
+    }
+
     /* Cards do mosaico */
     .card-wrapper {
         background-color: #FFFFFF; border-radius: 14px; overflow: hidden;
@@ -83,12 +97,6 @@ st.markdown("""
     }
     .card-info .linha { display: flex; justify-content: space-between; color: #334155; }
     .card-info .linha b { color: #0F172A; font-weight: 700; }
-    .badge-ambiente {
-        display: inline-block; padding: 2px 10px; border-radius: 999px;
-        font-size: 11px; font-weight: 700; text-transform: uppercase;
-    }
-    .badge-interna { background-color: #DCFCE7; color: #166534; }
-    .badge-externa { background-color: #FEF3C7; color: #92400E; }
 
     [data-testid="stImage"] img {
         border-radius: 0; object-fit: cover; height: 220px !important; width: 100%;
@@ -185,14 +193,13 @@ if foto_com_dados is not None:
             st.sidebar.error("⚠️ Preencha todos os campos antes de salvar.")
 
 # --- FILTROS DE BUSCA INLINE ---
-st.markdown('<div class="filtro-box">', unsafe_allow_html=True)
-st.markdown('<h3>🔍 Filtros de Busca</h3>', unsafe_allow_html=True)
-col1, col2, col3, col4 = st.columns(4)
-with col1: busca_s = st.text_input("Filtrar por Série", placeholder="Ex: CASSETE, INVERTER...").upper()
-with col2: busca_m = st.text_input("Buscar por Modelo (Ex: CF100, CB601...)", placeholder="Digitar modelo...").upper()
-with col3: busca_a = st.selectbox("Ambiente", ["Todos", "Interna", "Externa"])
-with col4: busca_c = st.text_input("Buscar por Código", placeholder="Digitar código...").upper()
-st.markdown('</div>', unsafe_allow_html=True)
+with st.container(border=True):
+    st.markdown('<h3>🔍 Filtros de Busca</h3>', unsafe_allow_html=True)
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: busca_s = st.text_input("Filtrar por Série", placeholder="Ex: CASSETE, INVERTER...").upper()
+    with col2: busca_m = st.text_input("Buscar por Modelo (Ex: CF100, CB601...)", placeholder="Digitar modelo...").upper()
+    with col3: busca_a = st.selectbox("Ambiente", ["Todos", "Interna", "Externa"])
+    with col4: busca_c = st.text_input("Buscar por Código", placeholder="Digitar código...").upper()
 
 # --- REQUISIÇÃO E LEITURA DE DADOS DO GOOGLE SHEETS ---
 try:
@@ -219,16 +226,14 @@ if not df_dados.empty:
         for idx, Server_linha in df_filtrado.reset_index().iterrows():
             coluna_da_vez = colunas_mosaico[idx % 4]
             with coluna_da_vez:
-                badge_classe = "badge-interna" if Server_linha['Ambiente'] == "Interna" else "badge-externa"
-
                 st.markdown('<div class="card-wrapper">', unsafe_allow_html=True)
                 st.image(Server_linha['Imagem'])
                 st.markdown(f"""
                     <div class="card-info">
                         <div class="linha"><span>Série</span><b>{Server_linha['Série']}</b></div>
                         <div class="linha"><span>Modelo</span><b>{Server_linha['Modelo']}</b></div>
+                        <div class="linha"><span>Ambiente</span><b>{Server_linha['Ambiente']}</b></div>
                         <div class="linha"><span>Código</span><b>{Server_linha['Código']}</b></div>
-                        <div style="margin-top:8px;"><span class="badge-ambiente {badge_classe}">{Server_linha['Ambiente']}</span></div>
                     </div>
                 """, unsafe_allow_html=True)
                 st.markdown('</div>', unsafe_allow_html=True)
