@@ -50,6 +50,24 @@ st.markdown("""
         background-color: #1E293B !important; color: #F8FAFC !important;
         border-radius: 8px !important; border: 1px solid #334155 !important;
     }
+
+    /* CORREÇÃO: campo de texto (ex: CÓDIGO) ficando em branco/ilegível.
+       Isso é um bug conhecido do Chrome/WebKit: o "color" sozinho às vezes
+       não é aplicado ao texto digitado dentro do input. Forçamos com
+       -webkit-text-fill-color, que tem prioridade sobre a renderização
+       nativa do campo. */
+    section[data-testid="stSidebar"] .stTextInput input {
+        color: #F8FAFC !important;
+        -webkit-text-fill-color: #F8FAFC !important;
+        caret-color: #F8FAFC !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] .stTextInput input::placeholder {
+        color: #94A3B8 !important;
+        -webkit-text-fill-color: #94A3B8 !important;
+        opacity: 1 !important;
+    }
+
     section[data-testid="stSidebar"] .stButton button {
         background: linear-gradient(135deg, #2563EB, #1D4ED8); color: #FFFFFF !important;
         font-weight: 700; border-radius: 10px; border: none; padding: 10px 0;
@@ -99,8 +117,29 @@ st.markdown("""
     .card-info .linha { display: flex; justify-content: space-between; color: #334155; }
     .card-info .linha b { color: #0F172A; font-weight: 700; }
 
+    /* CORREÇÃO: fotos "no canto". Antes usava object-fit: cover, que corta
+       a imagem para preencher o quadro — se o componente na foto não está
+       centralizado na imagem original, o corte empurra ele pra um dos
+       cantos. Agora o quadro é um contêiner flex que centraliza a imagem
+       inteira (sem cortar nada) tanto na horizontal quanto na vertical. */
+    [data-testid="stImage"] {
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        height: 220px !important;
+        width: 100% !important;
+        background-color: #FFFFFF !important;
+        overflow: hidden !important;
+    }
     [data-testid="stImage"] img {
-        border-radius: 0; object-fit: cover; height: 220px !important; width: 100%;
+        max-height: 220px !important;
+        max-width: 100% !important;
+        width: auto !important;
+        height: auto !important;
+        object-fit: contain !important;
+        object-position: center center !important;
+        margin: 0 auto !important;
+        display: block !important;
     }
 
     /* Contador de resultados */
