@@ -25,7 +25,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown("""<div class="header-box"><h1>📦 Sistema de Catalogação</h1><p>Upload direto para Drive</p></div>""", unsafe_allow_html=True)
+st.markdown("""<div class="header-box"><h1>📦 Sistema de Catalogação</h1><p>Upload direto para o Drive</p></div>""", unsafe_allow_html=True)
 
 # --- CONFIGURAÇÕES ---
 URL_PLANILHA = st.secrets["connections"]["google_script_url"] if "connections" in st.secrets else ""
@@ -49,37 +49,42 @@ if "form_counter" not in st.session_state: st.session_state.form_counter = 0
 key_suffix = st.session_state.form_counter
 
 st.sidebar.header("📸 Adicionar Item")
-origem = st.sidebar.radio("Método:", ["Tirar Foto", "Upload Galeria"], key=f"o_{key_suffix}")
-foto = st.sidebar.camera_input("Foto", key=f"c_{key_suffix}") if origem == "Tirar Foto" else st.sidebar.file_uploader("Arquivo", type=["jpg","png"], key=f"u_{key_suffix}")
+origem = st.sidebar.radio("Método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"], key=f"o_{key_suffix}")
+foto = st.sidebar.camera_input("Foto", key=f"c_{key_suffix}") if origem == "Tirar Foto (Celular/PC)" else st.sidebar.file_uploader("Arquivo", type=["jpg","png","jpeg"], key=f"u_{key_suffix}")
 
 if foto:
-    s = st.sidebar.text_input("SÉRIE:", key=f"s_{key_suffix}").upper()
-    m = st.sidebar.text_input("MODELO:", key=f"m_{key_suffix}").upper()
+    s = st.sidebar.text_input("SÉRIE:", key=f"s_{key_suffix}").strip().upper()
+    m = st.sidebar.text_input("MODELO:", key=f"m_{key_suffix}").strip().upper()
     a = st.sidebar.selectbox("AMBIENTE:", ["Externa", "Interna"], key=f"a_{key_suffix}")
-    c = st.sidebar.text_input("CÓDIGO:", key=f"c_code_{key_suffix}").upper()
+    c = st.sidebar.text_input("CÓDIGO:", key=f"c_code_{key_suffix}").strip().upper()
 
     if st.sidebar.button("💾 Enviar ao Sistema", key=f"btn_{key_suffix}"):
-        with st.spinner("Enviando..."):
-            dados = {
-                "serie": s, "modelo": m, "ambiente": a, "codigo": c,
-                "filedata": base64.b64encode(foto.getvalue()).decode('utf-8'),
-                "filename": f"{c}.jpg", "mimetype": "image/jpeg"
-            }
-            try:
-                r = requests.post(URL_PLANILHA, data=json.dumps(dados), timeout=60)
-                if r.status_code == 200:
-                    st.sidebar.success("✅ Sucesso!")
-                    st.session_state.form_counter += 1
-                    st.rerun()
-                else:
-                    st.sidebar.error("Erro no envio.")
-            except Exception as e:
-                st.sidebar.error(f"Erro: {e}")
+        if s and m and c and URL_PLANILHA:
+            with st.spinner("Enviando foto e dados..."):
+                try:
+                    # Envio único para o Apps Script
+                    dados = {
+                        "serie": s, "modelo": m, "ambiente": a, "codigo": c,
+                        "filedata": base64.b64encode(foto.getvalue()).decode('utf-8'),
+                        "filename": f"{c}.jpg", "mimetype": "image/jpeg"
+                    }
+                    r = requests.post(URL_PLANILHA, data=json.dumps(dados), timeout=60)
+                    if r.status_code == 200:
+                        st.sidebar.success("✅ Sucesso!")
+                        st.session_state.form_counter += 1
+                        st.rerun()
+                    else:
+                        st.sidebar.error(f"Erro no servidor: {r.status_code}")
+                except Exception as e:
+                    st.sidebar.error(f"Erro: {e}")
 
 # --- BUSCA E EXIBIÇÃO ---
-busca_c = st.text_input("🔍 Filtrar por Código")
+st.markdown('<h3>🔍 Filtros de Busca</h3>', unsafe_allow_html=True)
+busca_c = st.text_input("Filtrar por Código")
+
 try:
-    df = st.connection("gsheets", type="gsheets").read(ttl="5s")
+    from streamlit_gsheets import GSheetsConnection
+    df = st.connection("gsheets", type=GSheetsConnection).read(ttl="5s")
     df.columns = ["Série", "Modelo", "Ambiente", "Código", "Imagem"]
     if busca_c: df = df[df['Código'].astype(str).str.contains(busca_c, na=False)]
     
@@ -88,8 +93,8 @@ try:
         with cols[idx % 4]:
             try:
                 b = obter_bytes_imagem(row['Imagem'])
-                st.markdown(f'<div class="card-wrapper"><div class="foto-frame"><img src="data:image/jpeg;base64,{base64.b64encode(b).decode()}"></div><div class="card-info"><b>{row["Código"]}</b><br>{row["Modelo"]}</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="card-wrapper"><div class="foto-frame"><img src="data:image/jpeg;base64,{base64.b64encode(b).decode()}"></div><div class="card-info"><b>Cód: {row["Código"]}</b><br>Mod: {row["Modelo"]}</div></div>', unsafe_allow_html=True)
             except:
-                st.markdown(f'<div class="card-wrapper"><div class="foto-frame">Sem imagem</div><div class="card-info"><b>{row["Código"]}</b></div></div>', unsafe_allow_html=True)
-except:
-    st.error("Erro ao carregar planilha.")
+                st.markdown(f'<div class="card-wrapper"><div class="foto-frame">Sem imagem</div><div class="card-info"><b>Cód: {row["Código"]}</b></div></div>', unsafe_allow_html=True)
+except Exception as e:
+    st.error("Planilha indisponível ou erro de conexão.")
