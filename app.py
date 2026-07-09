@@ -51,9 +51,7 @@ st.markdown("""
         border-radius: 8px !important; border: 1px solid #334155 !important;
     }
 
-    /* Campo de texto (ex: CÓDIGO) legível: forçamos a cor do texto digitado
-       com -webkit-text-fill-color, que resolve o bug do Chrome/WebKit onde
-       o "color" sozinho não é respeitado dentro do input. */
+    /* Campo de texto */
     section[data-testid="stSidebar"] .stTextInput input {
         color: #F8FAFC !important;
         -webkit-text-fill-color: #F8FAFC !important;
@@ -76,36 +74,7 @@ st.markdown("""
         box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
     }
 
-    /* Caixa de upload / câmera legível no tema escuro */
-    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"],
-    section[data-testid="stSidebar"] [data-testid="stCameraInput"] {
-        background-color: #1E293B !important;
-        border: 1.5px dashed #475569 !important;
-        border-radius: 10px !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] * {
-        color: #F1F5F9 !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] small,
-    section[data-testid="stSidebar"] [data-testid="stFileUploaderDropzone"] span {
-        color: #94A3B8 !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stBaseButton-secondary"] {
-        background-color: #334155 !important; color: #F1F5F9 !important;
-        border: 1px solid #475569 !important; border-radius: 8px !important;
-    }
-    section[data-testid="stSidebar"] [data-testid="stFileUploaderFile"] {
-        background-color: #1E293B !important; border-radius: 8px !important;
-    }
-
-    /* Cards do mosaico.
-       IMPORTANTE: a foto agora é embutida como base64 DENTRO deste mesmo
-       bloco HTML (veja o loop do mosaico em Python), em vez de usar
-       st.image(). Antes, st.image() era renderizado pelo Streamlit como um
-       componente separado, fora desta div — por isso ela nunca esteve
-       realmente "dentro" do card no HTML, e o CSS de centralização não
-       surtia efeito de verdade. Agora que a <img> é um filho real desta
-       div, a centralização e o zoom no hover funcionam corretamente. */
+    /* Cards do mosaico */
     .card-wrapper {
         background-color: #FFFFFF; border-radius: 14px;
         border: 1px solid #E2E8F0; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
@@ -116,49 +85,23 @@ st.markdown("""
         transform: translateY(-3px); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
     }
 
-    /* Moldura da foto: contêiner flex que centraliza a imagem inteira
-       (sem cortar nada) tanto na horizontal quanto na vertical. */
     .foto-frame {
-        position: relative;
-        height: 220px;
-        width: 100%;
-        background-color: #FFFFFF;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden;
-        border-radius: 14px 14px 0 0;
+        position: relative; height: 220px; width: 100%;
+        background-color: #FFFFFF; display: flex;
+        align-items: center; justify-content: center;
+        overflow: hidden; border-radius: 14px 14px 0 0;
     }
     .foto-frame img {
-        max-height: 220px;
-        max-width: 100%;
-        width: auto;
-        height: auto;
-        object-fit: contain;
-        object-position: center center;
-        display: block;
-        margin: 0 auto;
-        cursor: zoom-in;
-        transition: transform 0.3s ease;
+        max-height: 220px; max-width: 100%; width: auto; height: auto;
+        object-fit: contain; object-position: center center; display: block;
+        margin: 0 auto; cursor: zoom-in; transition: transform 0.3s ease;
     }
-    /* Passar o mouse por cima amplia a foto (sem cortar), flutuando por
-       cima dos elementos vizinhos, pra mostrar mais detalhe sem clicar. */
-    .foto-frame:hover {
-        overflow: visible;
-        z-index: 200;
-    }
+    .foto-frame:hover { overflow: visible; z-index: 200; }
     .foto-frame:hover img {
-        transform: scale(2.2);
-        box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
-        border-radius: 10px;
-        background-color: #FFFFFF;
+        transform: scale(2.2); box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
+        border-radius: 10px; background-color: #FFFFFF;
     }
-    /* Eleva a coluna inteira em hover para a foto ampliada não ficar
-       escondida atrás dos cards vizinhos no mosaico */
-    div[data-testid="column"]:has(.foto-frame:hover) {
-        position: relative;
-        z-index: 200;
-    }
+    div[data-testid="column"]:has(.foto-frame:hover) { position: relative; z-index: 200; }
 
     .foto-indisponivel {
         height: 220px; width: 100%; display: flex; align-items: center;
@@ -174,14 +117,8 @@ st.markdown("""
     .card-info .linha { display: flex; justify-content: space-between; color: #334155; }
     .card-info .linha b { color: #0F172A; font-weight: 700; }
 
-    /* Contador de resultados */
     .contador-resultados {
         font-size: 15px; font-weight: 700; color: #1E293B; margin-bottom: 16px;
-    }
-
-    /* Alinhamento dos campos de filtro, mesmo se o rótulo quebrar linha */
-    div[data-testid="stHorizontalBlock"] label[data-testid="stWidgetLabel"] p {
-        min-height: 32px; display: flex; align-items: flex-end; margin-bottom: 4px;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -199,77 +136,36 @@ URL_PLANILHA = ""
 if "connections" in st.secrets and "google_script_url" in st.secrets["connections"]:
     URL_PLANILHA = st.secrets["connections"]["google_script_url"]
 
-
-# --- FUNÇÃO AUXILIAR: RESOLVER O VALOR DA COLUNA "IMAGEM" ---
-# A coluna "Imagem" pode conter três formatos diferentes, dependendo de como
-# o Apps Script foi configurado:
-#   1) Uma string base64 completa:  "data:image/jpeg;base64,......"
-#   2) Um link do Google Drive:     "https://drive.google.com/file/d/ID/view"
-#   3) Apenas o ID do arquivo:      "1PtTtqx7t0WsPHhSzN261sym3c8zz-0xG"
-# Convertemos (2) e (3) em uma URL de thumbnail pública do Drive.
 PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
 
 def extrair_id_drive(valor: str):
-    """Extrai o ID do arquivo de um link de Drive, ou retorna o próprio
-    valor se ele já parecer ser apenas o ID."""
     m = PADRAO_ID_DRIVE.search(valor)
     return m.group(0) if m else valor
 
 def montar_url_drive(valor: str) -> str:
-    """Monta a URL de thumbnail do Drive a partir de um link ou ID."""
     file_id = extrair_id_drive(valor)
     return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=3000)
 def obter_bytes_imagem(valor):
-    """Devolve os BYTES da imagem (não uma URL). Buscamos os bytes aqui,
-    no servidor, com `requests` (sem cabeçalho de Referer de navegador),
-    porque o Google Drive costuma bloquear/errar quando o <img src="...">
-    tenta carregar o arquivo diretamente do navegador (hotlink), mesmo
-    quando o arquivo está compartilhado publicamente. Buscando aqui e
-    entregando os bytes prontos, evitamos esse bloqueio.
-    Resultado é cacheado por valor (ID/URL) para não rebuscar a cada rerun.
-    """
-    if valor is None:
-        raise ValueError("Sem imagem")
+    if valor is None: raise ValueError("Sem imagem")
     valor = str(valor).strip()
-    if not valor:
-        raise ValueError("Sem imagem")
-
-    # Caso 1: já é uma imagem em base64
+    if not valor: raise ValueError("Sem imagem")
     if valor.startswith("data:image"):
         return base64.b64decode(valor.split(",")[1])
-
-    # Caso 2 e 3: link do Drive ou ID puro -> busca via requests no servidor
     url = montar_url_drive(valor)
     resposta = requests.get(url, timeout=20)
     resposta.raise_for_status()
     conteudo = resposta.content
-    # O Drive às vezes responde 200 com uma página HTML de erro/aviso em
-    # vez da imagem (arquivo não compartilhado, por exemplo). Detectamos
-    # isso checando se realmente veio uma imagem.
     tipo = resposta.headers.get("Content-Type", "")
-    if "image" not in tipo:
-        raise ValueError("Drive não retornou uma imagem (verifique o compartilhamento do arquivo)")
+    if "image" not in tipo: raise ValueError("Drive não retornou uma imagem")
     return conteudo
 
-
-# --- CONTROLE DE LIMPEZA AUTOMÁTICA DO FORMULÁRIO ---
-# Um contador é usado para gerar novas "keys" para os widgets sempre que um
-# item é enviado com sucesso. Isso força o Streamlit a recriar os campos
-# vazios, simulando a limpeza do formulário.
-if "form_counter" not in st.session_state:
-    st.session_state.form_counter = 0
-
+if "form_counter" not in st.session_state: st.session_state.form_counter = 0
 key_suffix = st.session_state.form_counter
 
-# --- PAINEL LATERAL: CADASTRAR/TIRAR FOTO NA HORA ---
 st.sidebar.header("📸 Adicionar Novo Item")
-origem = st.sidebar.radio(
-    "Selecione o método:",
-    ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"],
-    key=f"origem_{key_suffix}"
-)
+origem = st.sidebar.radio("Selecione o método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"], key=f"origem_{key_suffix}")
 
 foto_com_dados = None
 if origem == "Tirar Foto (Celular/PC)":
@@ -279,52 +175,32 @@ else:
 
 if foto_com_dados is not None:
     st.sidebar.subheader("📝 Informações de Registro")
-
     input_serie = st.sidebar.text_input("SÉRIE:", key=f"serie_{key_suffix}").strip().upper()
     input_modelo = st.sidebar.text_input("MODELO:", key=f"modelo_{key_suffix}").strip().upper()
     input_ambiente = st.sidebar.selectbox("AMBIENTE:", ["Externa", "Interna"], key=f"ambiente_{key_suffix}")
     input_codigo = st.sidebar.text_input("CÓDIGO:", key=f"codigo_{key_suffix}").strip().upper()
 
-    if not URL_PLANILHA:
-        st.sidebar.error("⚠️ google_script_url não encontrado em st.secrets['connections']. Confira o arquivo secrets.toml no painel do Streamlit Cloud.")
-
     if st.sidebar.button("💾 Enviar Direto para o Sistema", key=f"btn_enviar_{key_suffix}"):
         if input_serie and input_modelo and input_codigo and URL_PLANILHA:
             with st.spinner("Registrando dados..."):
-                bytes_imagem_envio = foto_com_dados.getvalue()
-                imagem_base64 = base64.b64encode(bytes_imagem_envio).decode('utf-8')
-                string_imagem_final = f"data:image/jpeg;base64,{imagem_base64}"
-
                 dados_envio = {
                     "serie": input_serie,
                     "modelo": input_modelo,
                     "ambiente": input_ambiente,
                     "codigo": input_codigo,
-                    "imagem": string_imagem_final
+                    "imagem": "PENDENTE_UPLOAD_DRIVE"
                 }
-
                 try:
-                    resposta = requests.post(
-                        URL_PLANILHA,
-                        data=json.dumps(dados_envio),
-                        headers={'Content-Type': 'application/json'},
-                        timeout=30
-                    )
+                    resposta = requests.post(URL_PLANILHA, data=json.dumps(dados_envio), headers={'Content-Type': 'application/json'}, timeout=30)
                     if resposta.status_code == 200:
-                        st.sidebar.success("✅ Salvo com sucesso na Planilha!")
-                        # Incrementa o contador para gerar novas keys e "limpar" o formulário
+                        st.sidebar.success("✅ Dados salvos na Planilha! (Realize o upload da foto no Drive)")
                         st.session_state.form_counter += 1
                         st.rerun()
                     else:
-                        st.sidebar.error(f"⚠️ Apps Script retornou status {resposta.status_code}: {resposta.text[:300]}")
+                        st.sidebar.error(f"⚠️ Apps Script retornou status {resposta.status_code}")
                 except Exception as e:
                     st.sidebar.error(f"Erro ao conectar com a planilha: {e}")
-        elif not URL_PLANILHA:
-            st.sidebar.warning("⚠️ O sistema está sem conexão configurada com o Google Sheets nos Secrets.")
-        else:
-            st.sidebar.error("⚠️ Preencha todos os campos antes de salvar.")
 
-# --- FILTROS DE BUSCA INLINE ---
 with st.container(border=True):
     st.markdown('<h3>🔍 Filtros de Busca</h3>', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
@@ -333,18 +209,16 @@ with st.container(border=True):
     with col3: busca_a = st.selectbox("Ambiente", ["Todos", "Interna", "Externa"])
     with col4: busca_c = st.text_input("Buscar por Código", placeholder="Digitar código...").upper()
 
-# --- REQUISIÇÃO E LEITURA DE DADOS DO GOOGLE SHEETS ---
 try:
     from streamlit_gsheets import GSheetsConnection
     conexao_sheets = st.connection("gsheets", type=GSheetsConnection)
     df_dados = conexao_sheets.read(ttl="5s")
 except Exception:
-    st.info("💡 Pronto para rodar! Adicione os Secrets no painel do Streamlit Cloud para puxar os dados da planilha.")
+    st.info("💡 Pronto para rodar! Adicione os Secrets no painel do Streamlit Cloud.")
     st.stop()
 
 if not df_dados.empty:
     df_dados.columns = ["Série", "Modelo", "Ambiente", "Código", "Imagem"]
-
     df_filtrado = df_dados.copy()
     if busca_s: df_filtrado = df_filtrado[df_filtrado['Série'].str.upper().str.contains(busca_s, na=False)]
     if busca_m: df_filtrado = df_filtrado[df_filtrado['Modelo'].str.upper().str.contains(busca_m, na=False)]
@@ -352,23 +226,17 @@ if not df_dados.empty:
     if busca_c: df_filtrado = df_filtrado[df_filtrado['Código'].astype(str).str.contains(busca_c, na=False)]
 
     if not df_filtrado.empty:
-        st.markdown(f'<div class="contador-resultados">Mosaico de Itens · {len(df_filtrado)} encontrados</div>', unsafe_allow_html=True)
         colunas_mosaico = st.columns(4)
-
         for idx, Server_linha in df_filtrado.reset_index().iterrows():
             coluna_da_vez = colunas_mosaico[idx % 4]
             with coluna_da_vez:
                 bytes_imagem = None
-                # Monta o HTML da foto (ou de um aviso de erro) para embutir
-                # DENTRO do mesmo card, como filho real da div — isso é o
-                # que garante a centralização e o zoom no hover.
                 try:
                     bytes_imagem = obter_bytes_imagem(Server_linha['Imagem'])
                     img_b64 = base64.b64encode(bytes_imagem).decode('utf-8')
                     html_foto = f'<div class="foto-frame"><img src="data:image/jpeg;base64,{img_b64}" alt="Foto do componente"></div>'
                 except Exception:
                     html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.<br>Verifique o compartilhamento no Drive.</div>'
-
                 st.markdown(f"""
                     <div class="card-wrapper">
                         {html_foto}
@@ -380,16 +248,8 @@ if not df_dados.empty:
                         </div>
                     </div>
                 """, unsafe_allow_html=True)
-
                 if bytes_imagem is not None:
-                    st.download_button(
-                        label="📥 Baixar Foto",
-                        data=bytes_imagem,
-                        file_name=f"{Server_linha['Série']}_{Server_linha['Modelo']}_{Server_linha['Código']}.jpg",
-                        mime="image/jpeg",
-                        key=f"btn_dl_{idx}",
-                        use_container_width=True
-                    )
+                    st.download_button("📥 Baixar Foto", data=bytes_imagem, file_name=f"{Server_linha['Série']}_{Server_linha['Modelo']}_{Server_linha['Código']}.jpg", mime="image/jpeg", key=f"btn_dl_{idx}", use_container_width=True)
     else:
         st.info("💡 Nenhuma foto corresponde aos filtros aplicados.")
 else:
