@@ -218,8 +218,72 @@ st.markdown("""
         font-size: 15px; font-weight: 700; color: #312E81; margin-bottom: 16px;
     }
 
+    /* Tela de login */
+    .login-box {
+        background-color: #FFFFFF; border-radius: 16px; padding: 36px 32px;
+        border: 1px solid #E2E8F0; box-shadow: 0 12px 32px rgba(30, 27, 75, 0.12);
+        margin-top: 60px;
+    }
+    .login-box h2 {
+        color: #1E1B4B; font-size: 22px; font-weight: 800; margin: 0 0 6px 0;
+    }
+    .login-box p {
+        color: #64748B; font-size: 13.5px; margin: 0 0 20px 0;
+    }
+    div[data-testid="stForm"] .stButton button {
+        background: linear-gradient(135deg, #4338CA, #3730A3); color: #FFFFFF !important;
+        font-weight: 700; border-radius: 10px; border: none; padding: 10px 0;
+        width: 100%;
+    }
+    div[data-testid="stForm"] .stButton button:hover {
+        background: linear-gradient(135deg, #3730A3, #312E81);
+    }
+
     </style>
 """, unsafe_allow_html=True)
+
+# --- AUTENTICAÇÃO (usuário e senha) ---
+# As credenciais NÃO ficam no código: elas vêm dos "Secrets" do Streamlit
+# Cloud (App -> Settings -> Secrets), no formato:
+#
+# [auth]
+# [auth.usuarios]
+# admin = "sua_senha_aqui"
+# joao = "outra_senha"
+#
+# Assim o usuário/senha nunca aparece no GitHub, mesmo com o repo público.
+USUARIOS_VALIDOS = {}
+if "auth" in st.secrets and "usuarios" in st.secrets["auth"]:
+    USUARIOS_VALIDOS = dict(st.secrets["auth"]["usuarios"])
+
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+
+if not st.session_state.autenticado:
+    col_esq, col_meio, col_dir = st.columns([1, 1.1, 1])
+    with col_meio:
+        st.markdown(
+            '<div class="login-box"><h2>🔒 Acesso Restrito</h2>'
+            '<p>Digite seu usuário e senha para visualizar o catálogo.</p></div>',
+            unsafe_allow_html=True
+        )
+        with st.form("form_login", clear_on_submit=False):
+            usuario_input = st.text_input("Usuário")
+            senha_input = st.text_input("Senha", type="password")
+            entrar = st.form_submit_button("Entrar", use_container_width=True)
+
+        if entrar:
+            if not USUARIOS_VALIDOS:
+                st.error("⚠️ Nenhum usuário configurado ainda nos Secrets do Streamlit Cloud.")
+            elif usuario_input in USUARIOS_VALIDOS and USUARIOS_VALIDOS[usuario_input] == senha_input:
+                st.session_state.autenticado = True
+                st.session_state.usuario_logado = usuario_input
+                st.rerun()
+            else:
+                st.error("Usuário ou senha incorretos.")
+    st.stop()  # impede que o resto do app (catálogo) seja renderizado
+
+
 
 st.markdown('<div class="assinatura">Desenvolvido por Zellic Araújo</div>', unsafe_allow_html=True)
 st.markdown("""
@@ -264,6 +328,12 @@ def obter_bytes_imagem(valor):
 
 if "form_counter" not in st.session_state: st.session_state.form_counter = 0
 key_suffix = st.session_state.form_counter
+
+st.sidebar.markdown(f"👤 Logado como **{st.session_state.get('usuario_logado', '')}**")
+if st.sidebar.button("🚪 Sair", key="btn_logout"):
+    st.session_state.autenticado = False
+    st.rerun()
+st.sidebar.divider()
 
 st.sidebar.header("📸 Adicionar Novo Item")
 origem = st.sidebar.radio("Selecione o método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"], key=f"origem_{key_suffix}")
