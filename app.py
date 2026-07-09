@@ -106,6 +106,11 @@ st.markdown("""
     .contador-resultados {
         font-size: 15px; font-weight: 700; color: #1E293B; margin-bottom: 16px;
     }
+
+    /* Alinhamento dos campos de filtro, mesmo se o rótulo quebrar linha */
+    div[data-testid="stHorizontalBlock"] label[data-testid="stWidgetLabel"] p {
+        min-height: 32px; display: flex; align-items: flex-end; margin-bottom: 4px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -197,7 +202,7 @@ with st.container(border=True):
     st.markdown('<h3>🔍 Filtros de Busca</h3>', unsafe_allow_html=True)
     col1, col2, col3, col4 = st.columns(4)
     with col1: busca_s = st.text_input("Filtrar por Série", placeholder="Ex: CASSETE, INVERTER...").upper()
-    with col2: busca_m = st.text_input("Buscar por Modelo (Ex: CF100, CB601...)", placeholder="Digitar modelo...").upper()
+    with col2: busca_m = st.text_input("Buscar por Modelo", placeholder="Ex: CF100, CB601...").upper()
     with col3: busca_a = st.selectbox("Ambiente", ["Todos", "Interna", "Externa"])
     with col4: busca_c = st.text_input("Buscar por Código", placeholder="Digitar código...").upper()
 
