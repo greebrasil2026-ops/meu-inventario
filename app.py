@@ -51,11 +51,9 @@ st.markdown("""
         border-radius: 8px !important; border: 1px solid #334155 !important;
     }
 
-    /* CORREÇÃO: campo de texto (ex: CÓDIGO) ficando em branco/ilegível.
-       Isso é um bug conhecido do Chrome/WebKit: o "color" sozinho às vezes
-       não é aplicado ao texto digitado dentro do input. Forçamos com
-       -webkit-text-fill-color, que tem prioridade sobre a renderização
-       nativa do campo. */
+    /* Campo de texto (ex: CÓDIGO) legível: forçamos a cor do texto digitado
+       com -webkit-text-fill-color, que resolve o bug do Chrome/WebKit onde
+       o "color" sozinho não é respeitado dentro do input. */
     section[data-testid="stSidebar"] .stTextInput input {
         color: #F8FAFC !important;
         -webkit-text-fill-color: #F8FAFC !important;
@@ -100,47 +98,81 @@ st.markdown("""
         background-color: #1E293B !important; border-radius: 8px !important;
     }
 
-    /* Cards do mosaico */
+    /* Cards do mosaico.
+       IMPORTANTE: a foto agora é embutida como base64 DENTRO deste mesmo
+       bloco HTML (veja o loop do mosaico em Python), em vez de usar
+       st.image(). Antes, st.image() era renderizado pelo Streamlit como um
+       componente separado, fora desta div — por isso ela nunca esteve
+       realmente "dentro" do card no HTML, e o CSS de centralização não
+       surtia efeito de verdade. Agora que a <img> é um filho real desta
+       div, a centralização e o zoom no hover funcionam corretamente. */
     .card-wrapper {
-        background-color: #FFFFFF; border-radius: 14px; overflow: hidden;
+        background-color: #FFFFFF; border-radius: 14px;
         border: 1px solid #E2E8F0; box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
         transition: transform 0.2s ease, box-shadow 0.2s ease; margin-bottom: 18px;
+        position: relative;
     }
     .card-wrapper:hover {
         transform: translateY(-3px); box-shadow: 0 10px 24px rgba(15, 23, 42, 0.12);
     }
-    .assinatura-topo { padding: 14px 16px 26px 16px; }
+
+    /* Moldura da foto: contêiner flex que centraliza a imagem inteira
+       (sem cortar nada) tanto na horizontal quanto na vertical. */
+    .foto-frame {
+        position: relative;
+        height: 220px;
+        width: 100%;
+        background-color: #FFFFFF;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        border-radius: 14px 14px 0 0;
+    }
+    .foto-frame img {
+        max-height: 220px;
+        max-width: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        object-position: center center;
+        display: block;
+        margin: 0 auto;
+        cursor: zoom-in;
+        transition: transform 0.3s ease;
+    }
+    /* Passar o mouse por cima amplia a foto (sem cortar), flutuando por
+       cima dos elementos vizinhos, pra mostrar mais detalhe sem clicar. */
+    .foto-frame:hover {
+        overflow: visible;
+        z-index: 200;
+    }
+    .foto-frame:hover img {
+        transform: scale(2.2);
+        box-shadow: 0 22px 55px rgba(15, 23, 42, 0.45);
+        border-radius: 10px;
+        background-color: #FFFFFF;
+    }
+    /* Eleva a coluna inteira em hover para a foto ampliada não ficar
+       escondida atrás dos cards vizinhos no mosaico */
+    div[data-testid="column"]:has(.foto-frame:hover) {
+        position: relative;
+        z-index: 200;
+    }
+
+    .foto-indisponivel {
+        height: 220px; width: 100%; display: flex; align-items: center;
+        justify-content: center; text-align: center; padding: 0 16px;
+        background-color: #FEF2F2; color: #991B1B; font-size: 13px; font-weight: 600;
+        border-radius: 14px 14px 0 0;
+    }
+
     .card-info {
         background-color: #F8FAFC; padding: 14px 16px; border-top: 1px solid #E2E8F0;
-        font-size: 13.5px; line-height: 1.7;
+        font-size: 13.5px; line-height: 1.7; border-radius: 0 0 14px 14px;
     }
     .card-info .linha { display: flex; justify-content: space-between; color: #334155; }
     .card-info .linha b { color: #0F172A; font-weight: 700; }
-
-    /* CORREÇÃO: fotos "no canto". Antes usava object-fit: cover, que corta
-       a imagem para preencher o quadro — se o componente na foto não está
-       centralizado na imagem original, o corte empurra ele pra um dos
-       cantos. Agora o quadro é um contêiner flex que centraliza a imagem
-       inteira (sem cortar nada) tanto na horizontal quanto na vertical. */
-    [data-testid="stImage"] {
-        display: flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        height: 220px !important;
-        width: 100% !important;
-        background-color: #FFFFFF !important;
-        overflow: hidden !important;
-    }
-    [data-testid="stImage"] img {
-        max-height: 220px !important;
-        max-width: 100% !important;
-        width: auto !important;
-        height: auto !important;
-        object-fit: contain !important;
-        object-position: center center !important;
-        margin: 0 auto !important;
-        display: block !important;
-    }
 
     /* Contador de resultados */
     .contador-resultados {
@@ -174,8 +206,7 @@ if "connections" in st.secrets and "google_script_url" in st.secrets["connection
 #   1) Uma string base64 completa:  "data:image/jpeg;base64,......"
 #   2) Um link do Google Drive:     "https://drive.google.com/file/d/ID/view"
 #   3) Apenas o ID do arquivo:      "1PtTtqx7t0WsPHhSzN261sym3c8zz-0xG"
-# st.image() só entende o formato (1) ou uma URL direta de imagem, então
-# convertemos (2) e (3) em uma URL de thumbnail pública do Drive.
+# Convertemos (2) e (3) em uma URL de thumbnail pública do Drive.
 PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
 
 def extrair_id_drive(valor: str):
@@ -196,7 +227,7 @@ def obter_bytes_imagem(valor):
     porque o Google Drive costuma bloquear/errar quando o <img src="...">
     tenta carregar o arquivo diretamente do navegador (hotlink), mesmo
     quando o arquivo está compartilhado publicamente. Buscando aqui e
-    entregando os bytes prontos pro st.image(), evitamos esse bloqueio.
+    entregando os bytes prontos, evitamos esse bloqueio.
     Resultado é cacheado por valor (ID/URL) para não rebuscar a cada rerun.
     """
     if valor is None:
@@ -260,8 +291,8 @@ if foto_com_dados is not None:
     if st.sidebar.button("💾 Enviar Direto para o Sistema", key=f"btn_enviar_{key_suffix}"):
         if input_serie and input_modelo and input_codigo and URL_PLANILHA:
             with st.spinner("Registrando dados..."):
-                bytes_imagem = foto_com_dados.getvalue()
-                imagem_base64 = base64.b64encode(bytes_imagem).decode('utf-8')
+                bytes_imagem_envio = foto_com_dados.getvalue()
+                imagem_base64 = base64.b64encode(bytes_imagem_envio).decode('utf-8')
                 string_imagem_final = f"data:image/jpeg;base64,{imagem_base64}"
 
                 dados_envio = {
@@ -327,24 +358,28 @@ if not df_dados.empty:
         for idx, Server_linha in df_filtrado.reset_index().iterrows():
             coluna_da_vez = colunas_mosaico[idx % 4]
             with coluna_da_vez:
-                st.markdown('<div class="card-wrapper">', unsafe_allow_html=True)
-
                 bytes_imagem = None
+                # Monta o HTML da foto (ou de um aviso de erro) para embutir
+                # DENTRO do mesmo card, como filho real da div — isso é o
+                # que garante a centralização e o zoom no hover.
                 try:
                     bytes_imagem = obter_bytes_imagem(Server_linha['Imagem'])
-                    st.image(bytes_imagem)
+                    img_b64 = base64.b64encode(bytes_imagem).decode('utf-8')
+                    html_foto = f'<div class="foto-frame"><img src="data:image/jpeg;base64,{img_b64}" alt="Foto do componente"></div>'
                 except Exception:
-                    st.warning("⚠️ Imagem indisponível. Verifique se o arquivo no Drive está compartilhado como 'Qualquer pessoa com o link'.")
+                    html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.<br>Verifique o compartilhamento no Drive.</div>'
 
                 st.markdown(f"""
-                    <div class="card-info">
-                        <div class="linha"><span>Série</span><b>{Server_linha['Série']}</b></div>
-                        <div class="linha"><span>Modelo</span><b>{Server_linha['Modelo']}</b></div>
-                        <div class="linha"><span>Ambiente</span><b>{Server_linha['Ambiente']}</b></div>
-                        <div class="linha"><span>Código</span><b>{Server_linha['Código']}</b></div>
+                    <div class="card-wrapper">
+                        {html_foto}
+                        <div class="card-info">
+                            <div class="linha"><span>Série</span><b>{Server_linha['Série']}</b></div>
+                            <div class="linha"><span>Modelo</span><b>{Server_linha['Modelo']}</b></div>
+                            <div class="linha"><span>Ambiente</span><b>{Server_linha['Ambiente']}</b></div>
+                            <div class="linha"><span>Código</span><b>{Server_linha['Código']}</b></div>
+                        </div>
                     </div>
                 """, unsafe_allow_html=True)
-                st.markdown('</div>', unsafe_allow_html=True)
 
                 if bytes_imagem is not None:
                     st.download_button(
