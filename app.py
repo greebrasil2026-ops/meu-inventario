@@ -1,3 +1,4 @@
+import re
 import streamlit as st
 import pandas as pd
 import base64
@@ -127,6 +128,60 @@ URL_PLANILHA = ""
 if "connections" in st.secrets and "google_script_url" in st.secrets["connections"]:
     URL_PLANILHA = st.secrets["connections"]["google_script_url"]
 
+
+# --- FUNÇÃO AUXILIAR: RESOLVER O VALOR DA COLUNA "IMAGEM" ---
+# A coluna "Imagem" pode conter três formatos diferentes, dependendo de como
+# o Apps Script foi configurado:
+#   1) Uma string base64 completa:  "data:image/jpeg;base64,......"
+#   2) Um link do Google Drive:     "https://drive.google.com/file/d/ID/view"
+#   3) Apenas o ID do arquivo:      "1PtTtqx7t0WsPHhSzN261sym3c8zz-0xG"
+# st.image() só entende o formato (1) ou uma URL direta de imagem, então
+# convertemos (2) e (3) em uma URL de thumbnail pública do Drive.
+PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
+
+def extrair_id_drive(valor: str):
+    """Extrai o ID do arquivo de um link de Drive, ou retorna o próprio
+    valor se ele já parecer ser apenas o ID."""
+    m = PADRAO_ID_DRIVE.search(valor)
+    return m.group(0) if m else valor
+
+def resolver_imagem(valor):
+    """Recebe o valor bruto da célula 'Imagem' e devolve algo que o
+    st.image() consegue renderizar (data URI ou URL http)."""
+    if valor is None:
+        return None
+    valor = str(valor).strip()
+    if not valor:
+        return None
+
+    # Caso 1: já é uma imagem em base64
+    if valor.startswith("data:image"):
+        return valor
+
+    # Caso 2: já é uma URL http(s)
+    if valor.startswith("http://") or valor.startswith("https://"):
+        if "drive.google.com" in valor:
+            file_id = extrair_id_drive(valor)
+            return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
+        return valor
+
+    # Caso 3: string "solta" -> tratamos como ID de arquivo do Drive
+    file_id = extrair_id_drive(valor)
+    return f"https://drive.google.com/thumbnail?id={file_id}&sz=w1000"
+
+def baixar_bytes_imagem(valor):
+    """Devolve os bytes da imagem para o botão de download,
+    seja ela base64 ou hospedada no Drive."""
+    valor = str(valor).strip()
+    if valor.startswith("data:image"):
+        return base64.b64decode(valor.split(",")[1])
+
+    url = resolver_imagem(valor)
+    resposta = requests.get(url, timeout=20)
+    resposta.raise_for_status()
+    return resposta.content
+
+
 # --- CONTROLE DE LIMPEZA AUTOMÁTICA DO FORMULÁRIO ---
 # Um contador é usado para gerar novas "keys" para os widgets sempre que um
 # item é enviado com sucesso. Isso força o Streamlit a recriar os campos
@@ -232,7 +287,16 @@ if not df_dados.empty:
             coluna_da_vez = colunas_mosaico[idx % 4]
             with coluna_da_vez:
                 st.markdown('<div class="card-wrapper">', unsafe_allow_html=True)
-                st.image(Server_linha['Imagem'])
+
+                url_imagem = resolver_imagem(Server_linha['Imagem'])
+                if url_imagem:
+                    try:
+                        st.image(url_imagem)
+                    except Exception:
+                        st.warning("⚠️ Não foi possível carregar esta imagem. Verifique se o arquivo no Drive está compartilhado como 'Qualquer pessoa com o link'.")
+                else:
+                    st.info("Sem imagem cadastrada.")
+
                 st.markdown(f"""
                     <div class="card-info">
                         <div class="linha"><span>Série</span><b>{Server_linha['Série']}</b></div>
@@ -244,7 +308,7 @@ if not df_dados.empty:
                 st.markdown('</div>', unsafe_allow_html=True)
 
                 try:
-                    dados_binarios = base64.b64decode(Server_linha['Imagem'].split(",")[1])
+                    dados_binarios = baixar_bytes_imagem(Server_linha['Imagem'])
                     st.download_button(
                         label="📥 Baixar Foto",
                         data=dados_binarios,
