@@ -526,6 +526,19 @@ components.html(
                 if (bloco) bloco.remove();
             }
         });
+
+        // Os separadores e o bloco horizontal pertenciam à antiga navegação.
+        // Ao removê-los, o formulário de novo item fica logo abaixo do login.
+        lateral.querySelectorAll('hr').forEach((linha) => {
+            const bloco = linha.closest('[data-testid="stElementContainer"]');
+            if (bloco) bloco.remove();
+        });
+        lateral.querySelectorAll('[data-testid="stHorizontalBlock"]').forEach((blocoHorizontal) => {
+            if (!(blocoHorizontal.innerText || '').trim()) {
+                const bloco = blocoHorizontal.closest('[data-testid="stElementContainer"]');
+                if (bloco) bloco.remove();
+            }
+        });
     }, 100);
     </script>
     """,
