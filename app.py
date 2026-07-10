@@ -402,6 +402,20 @@ def rolar_para_formulario(elemento_id: str) -> None:
         height=0,
     )
 
+def rolar_para_topo() -> None:
+    """Leva a visualização ao início do catálogo após trocar de página."""
+    components.html(
+        """
+        <script>
+        window.parent.scrollTo({top: 0, behavior: 'smooth'});
+        </script>
+        """,
+        height=0,
+    )
+
+def marcar_subida_de_pagina() -> None:
+    st.session_state.rolar_para_inicio_catalogo = True
+
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=1000)
 def obter_data_uri_imagem(valor):
     if valor is None or valor == "PENDENTE_UPLOAD_DRIVE":
@@ -647,7 +661,7 @@ if st.session_state.pagina_app == "catalogo":
         col1, col2, col3, col4 = st.columns(4)
         with col1: busca_s = st.text_input("Filtrar por Série", placeholder="Ex: CASSETE, INVERTER...").upper()
         with col2: busca_m = st.text_input("Buscar por Modelo", placeholder="Ex: CF100, CB601...").upper()
-        with col3: busca_a = st.selectbox("Ambiente", ["Todos", "Interna", "Externa"])
+        with col3: busca_a = st.selectbox("UNIDADE", ["Todos", "Interna", "Externa"])
         with col4: busca_c = st.text_input("Buscar por Código", placeholder="Digitar código...").upper()
 
     try:
@@ -770,8 +784,12 @@ if st.session_state.pagina_app == "catalogo":
                         step=1,
                         key="pagina_atual",
                         label_visibility="collapsed",
+                        on_change=marcar_subida_de_pagina,
                     )
                     st.caption(f"Página {st.session_state.pagina_atual} de {total_paginas}")
+
+                if st.session_state.pop("rolar_para_inicio_catalogo", False):
+                    rolar_para_topo()
         else:
             st.info("💡 Nenhum item encontrado.")
     except Exception:
