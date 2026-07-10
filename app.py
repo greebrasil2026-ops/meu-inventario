@@ -3,8 +3,10 @@ import streamlit as st
 import pandas as pd
 import base64
 import json
+import io
 import requests
 import datetime
+from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # =============================================================================
@@ -352,6 +354,11 @@ st.markdown("""
 URL_PLANILHA = ""
 if "connections" in st.secrets and "google_script_url" in st.secrets["connections"]:
     URL_PLANILHA = st.secrets["connections"]["google_script_url"]
+
+# URL pública de leitura da planilha. A aba Historico é acessada pelo nome,
+# pois a conexão pública do streamlit_gsheets exige GID numérico para abas
+# secundárias e não aceita o texto "Historico" como identificador.
+URL_BASE_DADOS = "https://docs.google.com/spreadsheets/d/1C5bL1iEyNdjPJBEPgCTW4ZWIDBSmo8Dj6vOLvunpMmg"
 
 PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
 
@@ -747,10 +754,15 @@ else:
             filtro_codigo_h = st.text_input("Filtrar por código", placeholder="Digitar código...").strip().upper()
 
     try:
-        from streamlit_gsheets import GSheetsConnection
-        conexao_h = st.connection("gsheets", type=GSheetsConnection)
-        # Sem cache: cada acesso ao histórico consulta a aba atual da planilha.
-        df_historico = conexao_h.read(worksheet="Historico", ttl="0s")
+        # Para uma conexão pública, streamlit_gsheets espera o GID numérico da
+        # aba. Esta URL do Google aceita o nome da aba e evita o HTTP 400 que
+        # ocorria ao enviar "Historico" como GID.
+        url_historico = (
+            f"{URL_BASE_DADOS}/gviz/tq?tqx=out:csv&sheet={quote('Historico')}"
+        )
+        resposta_historico = requests.get(url_historico, timeout=30)
+        resposta_historico.raise_for_status()
+        df_historico = pd.read_csv(io.StringIO(resposta_historico.text))
 
         colunas_esperadas = ["Data/Hora", "Usuário", "Ação", "Série", "Modelo", "Ambiente", "Código", "Motivo"]
 
