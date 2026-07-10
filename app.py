@@ -522,14 +522,6 @@ if not st.session_state.autenticado:
     st.stop()  # impede que o resto do app (catálogo) seja renderizado
 
 
-st.markdown('<div class="assinatura">Desenvolvido por Zellic Araújo</div>', unsafe_allow_html=True)
-st.markdown("""
-    <div class="header-box">
-        <h1>📦 Sistema de Catalogação e Inventário de Imagens</h1>
-        <p>Registre, organize e consulte fotos de componentes em tempo real</p>
-    </div>
-""", unsafe_allow_html=True)
-
 URL_PLANILHA = ""
 if "connections" in st.secrets and "google_script_url" in st.secrets["connections"]:
     URL_PLANILHA = st.secrets["connections"]["google_script_url"]
@@ -901,28 +893,25 @@ components.html(
     height=0,
 )
 
-with st.container(border=True):
-    col_nav_titulo, col_nav1_site, col_nav2_site = st.columns([2.3, 1, 1])
-    with col_nav_titulo:
-        st.markdown("### 🧭 Navegação")
-    with col_nav1_site:
-        if st.button(
-            "📦 Catálogo",
-            key="nav_catalogo_site",
-            use_container_width=True,
-            type="primary" if st.session_state.pagina_app == "catalogo" else "secondary",
-        ):
-            st.session_state.pagina_app = "catalogo"
-            st.rerun()
-    with col_nav2_site:
-        if st.button(
-            "🕓 Histórico",
-            key="nav_historico_site",
-            use_container_width=True,
-            type="primary" if st.session_state.pagina_app == "historico" else "secondary",
-        ):
-            st.session_state.pagina_app = "historico"
-            st.rerun()
+col_espaco, col_nav1_site, col_nav2_site = st.columns([6.2, 1.35, 1.35])
+with col_nav1_site:
+    if st.button("📦 Catálogo", key="nav_catalogo_site", use_container_width=True,
+                 type="primary" if st.session_state.pagina_app == "catalogo" else "secondary"):
+        st.session_state.pagina_app = "catalogo"
+        st.rerun()
+with col_nav2_site:
+    if st.button("🕓 Histórico", key="nav_historico_site", use_container_width=True,
+                 type="primary" if st.session_state.pagina_app == "historico" else "secondary"):
+        st.session_state.pagina_app = "historico"
+        st.rerun()
+
+st.markdown('<div class="assinatura">Desenvolvido por Zellic Araújo</div>', unsafe_allow_html=True)
+st.markdown("""
+    <div class="header-box">
+        <h1>📦 Sistema de Catalogação e Inventário de Imagens</h1>
+        <p>Registre, organize e consulte fotos de componentes em tempo real</p>
+    </div>
+""", unsafe_allow_html=True)
 
 # =============================================================================
 # PÁGINA: CATÁLOGO
