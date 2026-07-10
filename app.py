@@ -1,5 +1,6 @@
 import re
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import base64
 import json
@@ -387,6 +388,20 @@ def slug(valor: str) -> str:
     valor = str(valor or "item")
     return re.sub(r"[^A-Za-z0-9_-]+", "_", valor).strip("_") or "item"
 
+def rolar_para_formulario(elemento_id: str) -> None:
+    """Leva a janela até o formulário aberto após clicar em Editar ou Excluir."""
+    components.html(
+        f"""
+        <script>
+        const destino = window.parent.document.getElementById({json.dumps(elemento_id)});
+        if (destino) {{
+            setTimeout(() => destino.scrollIntoView({{behavior: 'smooth', block: 'start'}}), 50);
+        }}
+        </script>
+        """,
+        height=0,
+    )
+
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=1000)
 def obter_data_uri_imagem(valor):
     if valor is None or valor == "PENDENTE_UPLOAD_DRIVE":
@@ -516,6 +531,7 @@ if st.session_state.pagina_app == "catalogo":
     # --- CAIXA DE EDIÇÃO (aparece quando um item foi clicado para editar) ---
     if st.session_state.editando_codigo is not None:
         dados = st.session_state.get("editando_dados", {})
+        st.markdown('<div id="formulario-edicao"></div>', unsafe_allow_html=True)
         st.markdown(
             f'<div class="caixa-acao caixa-editar"><h4>✏️ Editando item — Código atual: {st.session_state.editando_codigo}</h4>'
             f'<p>Altere os campos abaixo. Se não escolher uma nova foto, a foto atual é mantida.</p></div>',
@@ -541,6 +557,10 @@ if st.session_state.pagina_app == "catalogo":
                 salvar_edicao = st.form_submit_button("💾 Salvar Alterações", use_container_width=True)
             with col_botoes_e2:
                 cancelar_edicao = st.form_submit_button("✖️ Cancelar", use_container_width=True)
+
+        if st.session_state.get("rolar_para_acao") == "editar":
+            st.session_state.pop("rolar_para_acao", None)
+            rolar_para_formulario("formulario-edicao")
 
         if cancelar_edicao:
             st.session_state.editando_codigo = None
@@ -575,6 +595,7 @@ if st.session_state.pagina_app == "catalogo":
     # --- CAIXA DE EXCLUSÃO (aparece quando um item foi clicado para excluir) ---
     if st.session_state.excluindo_codigo is not None:
         dados_exc = st.session_state.get("excluindo_dados", {})
+        st.markdown('<div id="formulario-exclusao"></div>', unsafe_allow_html=True)
         st.markdown(
             f'<div class="caixa-acao caixa-excluir"><h4>🗑️ Excluir item — Código: {st.session_state.excluindo_codigo}</h4>'
             f'<p>Série: <b>{dados_exc.get("Série","")}</b> · Modelo: <b>{dados_exc.get("Modelo","")}</b>. '
@@ -588,6 +609,10 @@ if st.session_state.pagina_app == "catalogo":
                 confirmar_exclusao = st.form_submit_button("🗑️ Confirmar Exclusão", use_container_width=True)
             with col_botoes_x2:
                 cancelar_exclusao = st.form_submit_button("✖️ Cancelar", use_container_width=True)
+
+        if st.session_state.get("rolar_para_acao") == "excluir":
+            st.session_state.pop("rolar_para_acao", None)
+            rolar_para_formulario("formulario-exclusao")
 
         if cancelar_exclusao:
             st.session_state.excluindo_codigo = None
@@ -653,20 +678,10 @@ if st.session_state.pagina_app == "catalogo":
             if st.session_state.pagina_atual > total_paginas:
                 st.session_state.pagina_atual = 1
 
-            col_contador, col_paginacao = st.columns([3, 2])
-            with col_contador:
-                st.markdown(
-                    f'<div class="contador-resultados">📊 {total_itens} item(ns) encontrado(s)</div>',
-                    unsafe_allow_html=True
-                )
-            with col_paginacao:
-                if total_paginas > 1:
-                    st.session_state.pagina_atual = st.number_input(
-                        f"Página (1 a {total_paginas})",
-                        min_value=1, max_value=total_paginas,
-                        value=st.session_state.pagina_atual, step=1,
-                        label_visibility="collapsed"
-                    )
+            st.markdown(
+                f'<div class="contador-resultados">📊 {total_itens} item(ns) encontrado(s)</div>',
+                unsafe_allow_html=True
+            )
 
             inicio = (st.session_state.pagina_atual - 1) * ITENS_POR_PAGINA
             fim = inicio + ITENS_POR_PAGINA
@@ -730,6 +745,7 @@ if st.session_state.pagina_app == "catalogo":
                                 st.session_state.editando_dados = linha.to_dict()
                                 st.session_state.excluindo_codigo = None
                                 st.session_state.excluindo_dados = None
+                                st.session_state.rolar_para_acao = "editar"
                                 st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
                         with col_btn_excluir:
@@ -739,11 +755,23 @@ if st.session_state.pagina_app == "catalogo":
                                 st.session_state.excluindo_dados = linha.to_dict()
                                 st.session_state.editando_codigo = None
                                 st.session_state.editando_dados = None
+                                st.session_state.rolar_para_acao = "excluir"
                                 st.rerun()
                             st.markdown('</div>', unsafe_allow_html=True)
 
             if total_paginas > 1:
-                st.caption(f"Página {st.session_state.pagina_atual} de {total_paginas}")
+                st.divider()
+                col_pag_esq, col_pag_meio, col_pag_dir = st.columns([1, 1.2, 1])
+                with col_pag_meio:
+                    st.number_input(
+                        f"Página (1 a {total_paginas})",
+                        min_value=1,
+                        max_value=total_paginas,
+                        step=1,
+                        key="pagina_atual",
+                        label_visibility="collapsed",
+                    )
+                    st.caption(f"Página {st.session_state.pagina_atual} de {total_paginas}")
         else:
             st.info("💡 Nenhum item encontrado.")
     except Exception:
