@@ -407,7 +407,18 @@ def rolar_para_topo() -> None:
     components.html(
         """
         <script>
-        window.parent.scrollTo({top: 0, behavior: 'smooth'});
+        setTimeout(() => {
+            const pagina = window.parent;
+            const documento = pagina.document;
+            const areaPrincipal = documento.querySelector('[data-testid="stAppViewContainer"]');
+
+            if (areaPrincipal) {
+                areaPrincipal.scrollTo({top: 0, behavior: 'smooth'});
+            }
+            documento.documentElement.scrollTo({top: 0, behavior: 'smooth'});
+            documento.body.scrollTo({top: 0, behavior: 'smooth'});
+            pagina.scrollTo({top: 0, behavior: 'smooth'});
+        }, 150);
         </script>
         """,
         height=0,
@@ -491,6 +502,58 @@ with col_nav2:
         st.rerun()
     st.markdown('</div>', unsafe_allow_html=True)
 st.sidebar.divider()
+
+# A navegação agora fica no conteúdo principal. O pequeno script remove os
+# controles antigos da barra lateral em versões já publicadas do app.
+components.html(
+    """
+    <script>
+    setTimeout(() => {
+        const lateral = window.parent.document.querySelector('[data-testid="stSidebar"]');
+        if (!lateral) return;
+
+        lateral.querySelectorAll('button').forEach((botao) => {
+            const texto = (botao.innerText || '').trim();
+            if (texto.includes('Catálogo') || texto.includes('Histórico')) {
+                const bloco = botao.closest('[data-testid="stElementContainer"]');
+                if (bloco) bloco.remove();
+            }
+        });
+
+        lateral.querySelectorAll('h1, h2, h3').forEach((titulo) => {
+            if ((titulo.innerText || '').trim().includes('Navegação')) {
+                const bloco = titulo.closest('[data-testid="stElementContainer"]');
+                if (bloco) bloco.remove();
+            }
+        });
+    }, 100);
+    </script>
+    """,
+    height=0,
+)
+
+with st.container(border=True):
+    col_nav_titulo, col_nav1_site, col_nav2_site = st.columns([2.3, 1, 1])
+    with col_nav_titulo:
+        st.markdown("### 🧭 Navegação")
+    with col_nav1_site:
+        if st.button(
+            "📦 Catálogo",
+            key="nav_catalogo_site",
+            use_container_width=True,
+            type="primary" if st.session_state.pagina_app == "catalogo" else "secondary",
+        ):
+            st.session_state.pagina_app = "catalogo"
+            st.rerun()
+    with col_nav2_site:
+        if st.button(
+            "🕓 Histórico",
+            key="nav_historico_site",
+            use_container_width=True,
+            type="primary" if st.session_state.pagina_app == "historico" else "secondary",
+        ):
+            st.session_state.pagina_app = "historico"
+            st.rerun()
 
 # =============================================================================
 # PÁGINA: CATÁLOGO
@@ -678,7 +741,12 @@ if st.session_state.pagina_app == "catalogo":
         df_filtrado = df_dados.copy()
         if busca_s: df_filtrado = df_filtrado[df_filtrado['Série'].str.upper().str.contains(busca_s, na=False)]
         if busca_m: df_filtrado = df_filtrado[df_filtrado['Modelo'].str.upper().str.contains(busca_m, na=False)]
-        if busca_a != "Todos": df_filtrado = df_filtrado[df_filtrado['Ambiente'] == busca_a]
+        if busca_a != "Todos":
+            # Ignora espaços extras e diferenças entre maiúsculas/minúsculas
+            # vindas da planilha antes de comparar a unidade selecionada.
+            unidade_planilha = df_filtrado['Ambiente'].astype(str).str.strip().str.casefold()
+            unidade_filtro = busca_a.strip().casefold()
+            df_filtrado = df_filtrado[unidade_planilha == unidade_filtro]
         if busca_c: df_filtrado = df_filtrado[df_filtrado['Código'].astype(str).str.contains(busca_c, na=False)]
 
         total_itens = len(df_filtrado)
