@@ -399,6 +399,16 @@ def enviar_para_backend(payload: dict) -> tuple:
             headers={'Content-Type': 'application/json'}, timeout=60
         )
         if resposta.status_code == 200:
+            # O Apps Script responde HTTP 200 até para erros de validação.
+            # Por isso, também verificamos o JSON devolvido pelo webhook.
+            try:
+                retorno = resposta.json()
+                if retorno.get("ok") is False:
+                    return False, retorno.get("mensagem", "O backend recusou a operação.")
+            except ValueError:
+                # Compatibilidade com versões antigas do Apps Script que não
+                # retornavam JSON.
+                pass
             return True, "ok"
         return False, f"Erro ao salvar: {resposta.status_code}"
     except Exception as e:
@@ -739,12 +749,24 @@ else:
     try:
         from streamlit_gsheets import GSheetsConnection
         conexao_h = st.connection("gsheets", type=GSheetsConnection)
-        df_historico = conexao_h.read(worksheet="Historico", ttl="30s")
+        # Sem cache: cada acesso ao histórico consulta a aba atual da planilha.
+        df_historico = conexao_h.read(worksheet="Historico", ttl="0s")
 
         colunas_esperadas = ["Data/Hora", "Usuário", "Ação", "Série", "Modelo", "Ambiente", "Código", "Motivo"]
-        if list(df_historico.columns[:len(colunas_esperadas)]) != colunas_esperadas:
-            df_historico.columns = colunas_esperadas[:len(df_historico.columns)]
 
+        # A conexão pode devolver colunas extras vazias ou pequenas diferenças
+        # de espaço no cabeçalho. Mantemos somente as oito colunas do histórico
+        # e padronizamos seus nomes sem causar erro de tamanho no DataFrame.
+        df_historico = df_historico.iloc[:, :len(colunas_esperadas)].copy()
+        df_historico.columns = [str(coluna).strip() for coluna in df_historico.columns]
+
+        if len(df_historico.columns) < len(colunas_esperadas):
+            raise ValueError(
+                "A aba Historico precisa ter as colunas: "
+                + " | ".join(colunas_esperadas)
+            )
+
+        df_historico.columns = colunas_esperadas
         df_historico = df_historico.dropna(how="all")
 
         if filtro_acao != "Todas":
@@ -813,10 +835,6 @@ else:
             if total_paginas_h > 1:
                 st.caption(f"Página {st.session_state.pagina_historico} de {total_paginas_h}")
 
-    except Exception:
-        st.info(
-            "💡 Ainda não há uma aba **Historico** na planilha (ou o backend "
-            "ainda não está registrando ações nela). Assim que o Apps Script "
-            "passar a gravar Criação/Edição/Exclusão nessa aba, elas vão "
-            "aparecer aqui automaticamente."
-        )
+    except Exception as erro:
+        st.error("Não foi possível carregar o histórico da planilha.")
+        st.caption(f"Detalhe técnico: {type(erro).__name__}: {erro}")
