@@ -374,6 +374,29 @@ st.markdown("""
         opacity: 1 !important;
     }
 
+    /* Botões de envio dos formulários administrativos. O seletor é mais
+    específico porque o Streamlit aplica estilos próprios ao botão desativado. */
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button:disabled,
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button[disabled],
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button:disabled,
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button[disabled] {
+        background: #334155 !important;
+        background-color: #334155 !important;
+        border: 1px solid #475569 !important;
+        box-shadow: none !important;
+        color: #F8FAFC !important;
+        -webkit-text-fill-color: #F8FAFC !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button:disabled *,
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button[disabled] *,
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button:disabled *,
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button[disabled] * {
+        color: #F8FAFC !important;
+        -webkit-text-fill-color: #F8FAFC !important;
+        opacity: 1 !important;
+    }
+
     </style>
 """, unsafe_allow_html=True)
 
