@@ -325,9 +325,35 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- AUTENTICAÇÃO (usuário e senha) ---
+URL_PLANILHA = ""
+if "connections" in st.secrets and "google_script_url" in st.secrets["connections"]:
+    URL_PLANILHA = st.secrets["connections"]["google_script_url"]
+
 USUARIOS_VALIDOS = {}
 if "auth" in st.secrets and "usuarios" in st.secrets["auth"]:
     USUARIOS_VALIDOS = dict(st.secrets["auth"]["usuarios"])
+
+USAR_GESTAO_USUARIOS = bool(st.secrets.get("auth", {}).get("gerenciar_usuarios", False))
+ADMINISTRADORES = set(st.secrets.get("auth", {}).get("administradores", []))
+CHAVE_ADMIN = st.secrets.get("auth", {}).get("admin_api_key", "")
+
+
+def autenticar_no_backend(usuario, senha):
+    """Autentica no Apps Script quando a gestão dinâmica de contas está ativa."""
+    if not URL_PLANILHA:
+        return False, "A URL do Apps Script não foi configurada.", None
+    try:
+        resposta = requests.post(
+            URL_PLANILHA,
+            data=json.dumps({"acao": "login", "usuario": usuario, "senha": senha}),
+            headers={"Content-Type": "application/json"}, timeout=30,
+        )
+        dados = resposta.json()
+        if resposta.status_code == 200 and dados.get("sucesso"):
+            return True, "", dados.get("perfil", "usuario")
+        return False, dados.get("mensagem", "Usuário ou senha incorretos."), None
+    except Exception:
+        return False, "Não foi possível validar o acesso no servidor.", None
 
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
@@ -346,11 +372,21 @@ if not st.session_state.autenticado:
             entrar = st.form_submit_button("Entrar", use_container_width=True)
 
         if entrar:
-            if not USUARIOS_VALIDOS:
+            if USAR_GESTAO_USUARIOS:
+                sucesso, mensagem, perfil = autenticar_no_backend(usuario_input.strip(), senha_input)
+                if sucesso:
+                    st.session_state.autenticado = True
+                    st.session_state.usuario_logado = usuario_input.strip()
+                    st.session_state.perfil_usuario = perfil
+                    st.rerun()
+                else:
+                    st.error(mensagem)
+            elif not USUARIOS_VALIDOS:
                 st.error("⚠️ Nenhum usuário configurado ainda nos Secrets do Streamlit Cloud.")
             elif usuario_input in USUARIOS_VALIDOS and USUARIOS_VALIDOS[usuario_input] == senha_input:
                 st.session_state.autenticado = True
                 st.session_state.usuario_logado = usuario_input
+                st.session_state.perfil_usuario = "admin" if usuario_input in ADMINISTRADORES else "usuario"
                 st.rerun()
             else:
                 st.error("Usuário ou senha incorretos.")
@@ -608,7 +644,7 @@ def enviar_para_backend(payload: dict) -> tuple:
             # Por isso, também verificamos o JSON devolvido pelo webhook.
             try:
                 retorno = resposta.json()
-                if retorno.get("ok") is False:
+                if retorno.get("ok") is False or retorno.get("sucesso") is False:
                     return False, retorno.get("mensagem", "O backend recusou a operação.")
             except ValueError:
                 # Compatibilidade com versões antigas do Apps Script que não
@@ -627,6 +663,51 @@ if "excluindo_codigo" not in st.session_state: st.session_state.excluindo_codigo
 key_suffix = st.session_state.form_counter
 
 usuario_logado = st.session_state.get('usuario_logado', '')
+perfil_usuario = st.session_state.get("perfil_usuario", "usuario")
+
+if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
+    st.sidebar.divider()
+    st.sidebar.subheader("Administracao de usuarios")
+    with st.sidebar.expander("Gerenciar contas", expanded=False):
+        st.caption("Somente administradores podem criar contas, alterar permissoes ou redefinir senhas.")
+
+        with st.form("form_criar_usuario", clear_on_submit=True):
+            novo_usuario = st.text_input("Novo usuario").strip()
+            nova_senha = st.text_input("Senha inicial", type="password")
+            novo_perfil = st.selectbox("Permissao", ["usuario", "admin"], format_func=lambda p: "Administrador" if p == "admin" else "Usuario")
+            criar_usuario = st.form_submit_button("Criar conta", use_container_width=True)
+        if criar_usuario:
+            if not novo_usuario or not nova_senha:
+                st.warning("Informe o nome de usuario e a senha inicial.")
+            elif len(nova_senha) < 8:
+                st.warning("A senha inicial deve ter pelo menos 8 caracteres.")
+            else:
+                sucesso, mensagem = enviar_para_backend({"acao": "criar_usuario", "usuario_alvo": novo_usuario, "senha": nova_senha, "perfil": novo_perfil, "administrador": usuario_logado, "chave_admin": CHAVE_ADMIN})
+                (st.success if sucesso else st.error)("Conta criada com sucesso." if sucesso else mensagem)
+
+        with st.form("form_alterar_perfil", clear_on_submit=True):
+            usuario_perfil = st.text_input("Usuario para alterar permissao").strip()
+            perfil_novo = st.selectbox("Nova permissao", ["usuario", "admin"], format_func=lambda p: "Administrador" if p == "admin" else "Usuario", key="perfil_novo")
+            salvar_perfil = st.form_submit_button("Salvar permissao", use_container_width=True)
+        if salvar_perfil:
+            if not usuario_perfil:
+                st.warning("Informe o usuario que recebera a nova permissao.")
+            else:
+                sucesso, mensagem = enviar_para_backend({"acao": "alterar_perfil_usuario", "usuario_alvo": usuario_perfil, "perfil": perfil_novo, "administrador": usuario_logado, "chave_admin": CHAVE_ADMIN})
+                (st.success if sucesso else st.error)("Permissao atualizada." if sucesso else mensagem)
+
+        with st.form("form_redefinir_senha", clear_on_submit=True):
+            usuario_senha = st.text_input("Usuario para redefinir senha").strip()
+            senha_redefinida = st.text_input("Nova senha", type="password")
+            salvar_senha = st.form_submit_button("Redefinir senha", use_container_width=True)
+        if salvar_senha:
+            if not usuario_senha or not senha_redefinida:
+                st.warning("Informe o usuario e a nova senha.")
+            elif len(senha_redefinida) < 8:
+                st.warning("A nova senha deve ter pelo menos 8 caracteres.")
+            else:
+                sucesso, mensagem = enviar_para_backend({"acao": "redefinir_senha_usuario", "usuario_alvo": usuario_senha, "senha": senha_redefinida, "administrador": usuario_logado, "chave_admin": CHAVE_ADMIN})
+                (st.success if sucesso else st.error)("Senha redefinida com sucesso." if sucesso else mensagem)
 st.sidebar.markdown(f"👤 Logado como **{usuario_logado}**")
 if st.sidebar.button("🚪 Sair", key="btn_logout"):
     st.session_state.autenticado = False
