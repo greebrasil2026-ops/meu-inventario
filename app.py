@@ -951,7 +951,9 @@ if st.session_state.pagina_app == "catalogo":
         st.sidebar.subheader("📝 Informações de Registro")
         input_serie = st.sidebar.text_input("SÉRIE:", key=f"serie_{key_suffix}").strip().upper()
         input_modelo = st.sidebar.text_input("MODELO:", key=f"modelo_{key_suffix}").strip().upper()
-        input_ambiente = st.sidebar.selectbox("UNIDADE:", ["Externa", "Interna"], key=f"ambiente_{key_suffix}")
+        input_ambiente = st.sidebar.selectbox(
+            "UNIDADE:", ["Painel", "Interna", "Externa"], key=f"ambiente_{key_suffix}"
+        )
         input_codigo = st.sidebar.text_input("CÓDIGO:", key=f"codigo_{key_suffix}").strip().upper()
 
         if st.sidebar.button(
@@ -997,9 +999,9 @@ if st.session_state.pagina_app == "catalogo":
             with col_e2:
                 edit_modelo = st.text_input("Modelo", value=dados.get("Modelo", "")).strip().upper()
             with col_e3:
-                ambientes = ["Externa", "Interna"]
+                ambientes = ["Painel", "Interna", "Externa"]
                 idx_amb = ambientes.index(dados.get("Ambiente")) if dados.get("Ambiente") in ambientes else 0
-                edit_ambiente = st.selectbox("Ambiente", ambientes, index=idx_amb)
+                edit_ambiente = st.selectbox("Unidade", ambientes, index=idx_amb)
             with col_e4:
                 edit_codigo = st.text_input("Código", value=dados.get("Código", "")).strip().upper()
 
@@ -1100,7 +1102,7 @@ if st.session_state.pagina_app == "catalogo":
         col1, col2, col3, col4 = st.columns(4)
         with col1: busca_s = st.text_input("Filtrar por Série", placeholder="Ex: CASSETE, INVERTER...").upper()
         with col2: busca_m = st.text_input("Buscar por Modelo", placeholder="Ex: CF100, CB601...").upper()
-        with col3: busca_a = st.selectbox("UNIDADE", ["Todos", "Interna", "Externa"])
+        with col3: busca_a = st.selectbox("UNIDADE", ["Todos", "Painel", "Interna", "Externa"])
         with col4: busca_c = st.text_input("Buscar por Código", placeholder="Digitar código...").upper()
 
     try:
