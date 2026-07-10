@@ -331,6 +331,49 @@ st.markdown("""
         background: linear-gradient(135deg, #3730A3, #312E81);
     }
 
+    /* Corrige contraste do expansor e dos botões na barra lateral. A regra
+    geral da sidebar usa texto claro; sem estas exceções, ele some sobre
+    componentes que o Streamlit desenha com fundo claro. */
+    section[data-testid="stSidebar"] details,
+    section[data-testid="stSidebar"] [data-testid="stExpander"] {
+        background-color: #16213A !important;
+        border: 1px solid #2A3752 !important;
+        border-radius: 8px !important;
+    }
+    section[data-testid="stSidebar"] details > summary,
+    section[data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        background-color: #16213A !important;
+        color: #F8FAFC !important;
+    }
+    section[data-testid="stSidebar"] details > summary *,
+    section[data-testid="stSidebar"] [data-testid="stExpander"] summary * {
+        color: #F8FAFC !important;
+        -webkit-text-fill-color: #F8FAFC !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] .stButton button:not(:disabled),
+    section[data-testid="stSidebar"] .stButton button:not(:disabled) * {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] .stButton button:disabled,
+    section[data-testid="stSidebar"] .stButton button[disabled] {
+        background: #CBD5E1 !important;
+        border: 1px solid #94A3B8 !important;
+        color: #334155 !important;
+        opacity: 1 !important;
+        cursor: not-allowed !important;
+    }
+    section[data-testid="stSidebar"] .stButton button:disabled *,
+    section[data-testid="stSidebar"] .stButton button[disabled] *,
+    section[data-testid="stSidebar"] .stButton button:disabled p,
+    section[data-testid="stSidebar"] .stButton button[disabled] p {
+        color: #334155 !important;
+        -webkit-text-fill-color: #334155 !important;
+        opacity: 1 !important;
+    }
+
     </style>
 """, unsafe_allow_html=True)
 
