@@ -418,6 +418,38 @@ st.markdown("""
         opacity: 1 !important;
     }
 
+    /* Botões dos formulários: aparência visível também quando o mouse não
+    está sobre eles. O Streamlit não os envolve sempre na classe .stButton. */
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button,
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #93C5FD !important;
+        box-shadow: none !important;
+        color: #1D4ED8 !important;
+        -webkit-text-fill-color: #1D4ED8 !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button *,
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button * {
+        color: #1D4ED8 !important;
+        -webkit-text-fill-color: #1D4ED8 !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button:not(:disabled):hover,
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button:not(:disabled):hover {
+        background: #2563EB !important;
+        background-color: #2563EB !important;
+        border-color: #2563EB !important;
+    }
+    section[data-testid="stSidebar"] div[data-testid="stForm"] button:not(:disabled):hover *,
+    section[data-testid="stSidebar"] div[data-testid="stFormSubmitButton"] button:not(:disabled):hover * {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }
+
     </style>
 """, unsafe_allow_html=True)
 
