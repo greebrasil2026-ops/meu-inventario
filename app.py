@@ -5,6 +5,7 @@ import pandas as pd
 import base64
 import json
 import io
+import zipfile
 import requests
 import datetime
 from urllib.parse import quote
@@ -447,6 +448,133 @@ def obter_data_uri_imagem(valor):
     return f"data:image/jpeg;base64,{b64}"
 
 
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=1000)
+def baixar_imagem_para_excel(valor):
+    """Baixa a foto para inseri-la fisicamente no arquivo Excel."""
+    if valor is None or valor == "PENDENTE_UPLOAD_DRIVE":
+        return None
+    valor = str(valor).strip()
+    if not valor:
+        return None
+    try:
+        if valor.startswith("data:image"):
+            return base64.b64decode(valor.split(",", 1)[1])
+        # A mesma origem usada no mosaico, porém em resolução maior para Excel.
+        resposta = requests.get(montar_url_drive(valor, tamanho=1600), timeout=30)
+        resposta.raise_for_status()
+        if "image" not in resposta.headers.get("Content-Type", ""):
+            return None
+        return resposta.content
+    except Exception:
+        return None
+
+
+def preparar_imagem_excel(conteudo):
+    """Garante que a imagem seja aceita pelo Excel (JPEG/PNG/GIF/BMP)."""
+    if not conteudo:
+        return None
+    if conteudo.startswith((b"\xff\xd8\xff", b"\x89PNG", b"GIF87a", b"GIF89a", b"BM")):
+        return io.BytesIO(conteudo)
+    try:
+        # WebP, por exemplo, é convertido para JPEG antes de ser incorporado.
+        from PIL import Image
+        imagem = Image.open(io.BytesIO(conteudo)).convert("RGB")
+        saida = io.BytesIO()
+        imagem.save(saida, format="JPEG", quality=88)
+        saida.seek(0)
+        return saida
+    except Exception:
+        return None
+
+
+def criar_excel_modelo(modelo, dados_modelo, imagens):
+    """Cria um Excel de um modelo, com uma imagem incorporada por linha."""
+    arquivo = io.BytesIO()
+    with pd.ExcelWriter(arquivo, engine="xlsxwriter") as escritor:
+        workbook = escritor.book
+        planilha = workbook.add_worksheet("Itens")
+        escritor.sheets["Itens"] = planilha
+
+        estilo_titulo = workbook.add_format({
+            "bold": True, "font_size": 16, "font_color": "FFFFFF", "bg_color": "312E81"
+        })
+        estilo_cabecalho = workbook.add_format({
+            "bold": True, "font_color": "FFFFFF", "bg_color": "4338CA", "border": 1
+        })
+        estilo_texto = workbook.add_format({"valign": "vcenter", "border": 1, "border_color": "E2E8F0"})
+        estilo_aviso = workbook.add_format({
+            "valign": "vcenter", "border": 1, "border_color": "E2E8F0", "font_color": "991B1B", "italic": True
+        })
+
+        planilha.merge_range("A1:E1", f"Catálogo — Modelo: {modelo}", estilo_titulo)
+        planilha.set_row(0, 28)
+        cabecalhos = ["Série", "Modelo", "Ambiente", "Código", "Imagem"]
+        for coluna, cabecalho in enumerate(cabecalhos):
+            planilha.write(1, coluna, cabecalho, estilo_cabecalho)
+        planilha.set_column("A:A", 20)
+        planilha.set_column("B:B", 24)
+        planilha.set_column("C:C", 16)
+        planilha.set_column("D:D", 20)
+        planilha.set_column("E:E", 26)
+        planilha.freeze_panes(2, 0)
+        planilha.autofilter(1, 0, len(dados_modelo) + 1, 4)
+
+        for linha_excel, (indice, item) in enumerate(dados_modelo.iterrows(), start=2):
+            planilha.set_row(linha_excel, 96)
+            for coluna, campo in enumerate(cabecalhos[:4]):
+                valor = item.get(campo, "")
+                planilha.write(linha_excel, coluna, "" if pd.isna(valor) else str(valor), estilo_texto)
+            foto = preparar_imagem_excel(imagens.get(indice))
+            if foto:
+                planilha.write_blank(linha_excel, 4, None, estilo_texto)
+                planilha.insert_image(linha_excel, 4, "imagem.jpg", {
+                    "image_data": foto, "x_scale": 0.23, "y_scale": 0.23,
+                    "x_offset": 5, "y_offset": 4, "object_position": 1,
+                })
+            else:
+                planilha.write(linha_excel, 4, "Imagem indisponível", estilo_aviso)
+    return arquivo.getvalue()
+
+
+def criar_zip_excel_por_modelo(dados):
+    """Retorna um ZIP com um .xlsx separado para cada modelo do catálogo."""
+    imagens = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futuros = {
+            executor.submit(baixar_imagem_para_excel, item["Imagem"]): indice
+            for indice, item in dados.iterrows()
+        }
+        for futuro in as_completed(futuros):
+            imagens[futuros[futuro]] = futuro.result()
+
+    pacote = io.BytesIO()
+    with zipfile.ZipFile(pacote, "w", zipfile.ZIP_DEFLATED) as zipado:
+        grupos = dados["Modelo"].fillna("SEM MODELO").astype(str).str.strip().replace("", "SEM MODELO")
+        nomes_usados = set()
+        for modelo, itens in dados.groupby(grupos, sort=True):
+            nome = slug(modelo)
+            nome_base, contador = nome, 2
+            while nome.casefold() in nomes_usados:
+                nome = f"{nome_base}_{contador}"
+                contador += 1
+            nomes_usados.add(nome.casefold())
+            zipado.writestr(f"catalogo_{nome}.xlsx", criar_excel_modelo(modelo, itens, imagens))
+    return pacote.getvalue()
+
+
+def criar_excel_catalogo_completo(dados):
+    """Cria um único Excel com todos os modelos, mantendo a foto por código."""
+    imagens = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futuros = {
+            executor.submit(baixar_imagem_para_excel, item["Imagem"]): indice
+            for indice, item in dados.iterrows()
+        }
+        for futuro in as_completed(futuros):
+            imagens[futuros[futuro]] = futuro.result()
+    return criar_excel_modelo("Todos os modelos", dados, imagens)
+
+
 def enviar_para_backend(payload: dict) -> tuple:
     """Envia qualquer ação (criar/editar/excluir) para o Apps Script.
     Retorna (sucesso: bool, mensagem: str)."""
@@ -763,6 +891,45 @@ if st.session_state.pagina_app == "catalogo":
         if busca_c: df_filtrado = df_filtrado[df_filtrado['Código'].astype(str).str.contains(busca_c, na=False)]
 
         total_itens = len(df_filtrado)
+
+        # ---------------------------------------------------------------------
+        # EXPORTAÇÃO: os arquivos incluem os dados e a imagem de cada código.
+        # "Tudo" ignora os filtros; "por modelo" cria um Excel independente
+        # para cada modelo e reúne todos em um único download ZIP.
+        # ---------------------------------------------------------------------
+        with st.expander("📥 Exportar catálogo para Excel", expanded=False):
+            st.write(
+                "As fotos são incorporadas no Excel ao lado de cada código. "
+                "Os filtros da tela não alteram estas exportações: elas sempre "
+                "consideram todo o catálogo."
+            )
+            col_exportar_tudo, col_exportar_modelo = st.columns(2)
+            with col_exportar_tudo:
+                if st.button("📄 Preparar Excel com tudo", key="preparar_excel_tudo", use_container_width=True):
+                    with st.spinner("Baixando fotos e montando o Excel completo..."):
+                        st.session_state.arquivo_excel_completo = criar_excel_catalogo_completo(df_dados)
+                if st.session_state.get("arquivo_excel_completo"):
+                    st.download_button(
+                        "⬇️ Baixar Excel completo",
+                        data=st.session_state.arquivo_excel_completo,
+                        file_name=f"catalogo_completo_{datetime.datetime.now():%Y-%m-%d}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="baixar_excel_tudo",
+                        use_container_width=True,
+                    )
+            with col_exportar_modelo:
+                if st.button("🗂️ Preparar Excel por modelo", key="preparar_excel_modelo", use_container_width=True):
+                    with st.spinner("Baixando fotos e montando os arquivos por modelo..."):
+                        st.session_state.arquivos_excel_por_modelo = criar_zip_excel_por_modelo(df_dados)
+                if st.session_state.get("arquivos_excel_por_modelo"):
+                    st.download_button(
+                        "⬇️ Baixar ZIP por modelo",
+                        data=st.session_state.arquivos_excel_por_modelo,
+                        file_name=f"catalogos_por_modelo_{datetime.datetime.now():%Y-%m-%d}.zip",
+                        mime="application/zip",
+                        key="baixar_excel_modelo",
+                        use_container_width=True,
+                    )
 
         if total_itens > 0:
             ITENS_POR_PAGINA = 20
