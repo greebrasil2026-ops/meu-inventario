@@ -397,6 +397,27 @@ st.markdown("""
         opacity: 1 !important;
     }
 
+    /* Regra final e sem classes intermediárias: aplica-se a todos os botões
+    desabilitados da lateral, inclusive aos que o Streamlit renderiza dentro
+    de componentes próprios. */
+    section[data-testid="stSidebar"] button:disabled,
+    section[data-testid="stSidebar"] button[disabled] {
+        background: #FFFFFF !important;
+        background-color: #FFFFFF !important;
+        border: 1px solid #93A4BF !important;
+        color: #172554 !important;
+        -webkit-text-fill-color: #172554 !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }
+    section[data-testid="stSidebar"] button:disabled *,
+    section[data-testid="stSidebar"] button[disabled] * {
+        color: #172554 !important;
+        -webkit-text-fill-color: #172554 !important;
+        font-weight: 800 !important;
+        opacity: 1 !important;
+    }
+
     </style>
 """, unsafe_allow_html=True)
 
