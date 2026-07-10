@@ -163,6 +163,16 @@ st.markdown("""
         font-weight: 700; border-radius: 10px; border: none; padding: 10px 0;
         width: 100%; transition: all 0.2s ease;
     }
+    section[data-testid="stSidebar"] .stButton button,
+    section[data-testid="stSidebar"] .stButton button * {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+    }
+    section[data-testid="stSidebar"] .stButton button:disabled,
+    section[data-testid="stSidebar"] .stButton button:disabled * {
+        color: #1E293B !important;
+        -webkit-text-fill-color: #1E293B !important;
+    }
     section[data-testid="stSidebar"] .stButton button:hover {
         background: linear-gradient(135deg, #3730A3, #312E81); transform: translateY(-1px);
         box-shadow: 0 4px 12px rgba(67, 56, 202, 0.45);
