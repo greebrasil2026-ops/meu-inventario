@@ -208,6 +208,18 @@ st.markdown("""
         color: #312E81 !important; font-weight: 700 !important; font-size: 13.5px;
     }
 
+    /* Rótulos do formulário de cadastro na barra lateral. A regra específica
+    garante texto branco mesmo com o estilo dos filtros da área principal. */
+    section[data-testid="stSidebar"] div[data-testid="stTextInput"] label p,
+    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label p {
+        color: #FFFFFF !important;
+        -webkit-text-fill-color: #FFFFFF !important;
+        font-family: 'Inter', sans-serif !important;
+        font-size: 13.5px !important;
+        font-weight: 800 !important;
+        letter-spacing: 0.2px;
+    }
+
     .foto-indisponivel {
         height: 220px; width: 100%; display: flex; align-items: center;
         justify-content: center; text-align: center; padding: 0 16px;
@@ -475,7 +487,7 @@ if st.session_state.pagina_app == "catalogo":
         st.sidebar.subheader("📝 Informações de Registro")
         input_serie = st.sidebar.text_input("SÉRIE:", key=f"serie_{key_suffix}").strip().upper()
         input_modelo = st.sidebar.text_input("MODELO:", key=f"modelo_{key_suffix}").strip().upper()
-        input_ambiente = st.sidebar.selectbox("AMBIENTE:", ["Externa", "Interna"], key=f"ambiente_{key_suffix}")
+        input_ambiente = st.sidebar.selectbox("UNIDADE:", ["Externa", "Interna"], key=f"ambiente_{key_suffix}")
         input_codigo = st.sidebar.text_input("CÓDIGO:", key=f"codigo_{key_suffix}").strip().upper()
 
         if st.sidebar.button("💾 Enviar Direto para o Sistema", key=f"btn_enviar_{key_suffix}"):
