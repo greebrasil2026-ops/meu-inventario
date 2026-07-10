@@ -575,6 +575,19 @@ def criar_excel_catalogo_completo(dados):
     return criar_excel_modelo("Todos os modelos", dados, imagens)
 
 
+def criar_excel_de_um_modelo(modelo, dados_modelo):
+    """Cria o Excel do modelo selecionado no menu de exportação."""
+    imagens = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futuros = {
+            executor.submit(baixar_imagem_para_excel, item["Imagem"]): indice
+            for indice, item in dados_modelo.iterrows()
+        }
+        for futuro in as_completed(futuros):
+            imagens[futuros[futuro]] = futuro.result()
+    return criar_excel_modelo(modelo, dados_modelo, imagens)
+
+
 def enviar_para_backend(payload: dict) -> tuple:
     """Envia qualquer ação (criar/editar/excluir) para o Apps Script.
     Retorna (sucesso: bool, mensagem: str)."""
@@ -893,43 +906,37 @@ if st.session_state.pagina_app == "catalogo":
         total_itens = len(df_filtrado)
 
         # ---------------------------------------------------------------------
-        # EXPORTAÇÃO: os arquivos incluem os dados e a imagem de cada código.
-        # "Tudo" ignora os filtros; "por modelo" cria um Excel independente
-        # para cada modelo e reúne todos em um único download ZIP.
+        # EXPORTAÇÃO POR MODELO: baixa apenas o modelo escolhido, com os dados
+        # e a foto incorporada ao lado de cada código.
         # ---------------------------------------------------------------------
         with st.expander("📥 Exportar catálogo para Excel", expanded=False):
             st.write(
-                "As fotos são incorporadas no Excel ao lado de cada código. "
-                "Os filtros da tela não alteram estas exportações: elas sempre "
-                "consideram todo o catálogo."
+                "Escolha o modelo desejado. O Excel terá Série, Modelo, Ambiente, "
+                "Código e a foto incorporada em cada linha."
             )
-            col_exportar_tudo, col_exportar_modelo = st.columns(2)
-            with col_exportar_tudo:
-                if st.button("📄 Preparar Excel com tudo", key="preparar_excel_tudo", use_container_width=True):
-                    with st.spinner("Baixando fotos e montando o Excel completo..."):
-                        st.session_state.arquivo_excel_completo = criar_excel_catalogo_completo(df_dados)
-                if st.session_state.get("arquivo_excel_completo"):
-                    st.download_button(
-                        "⬇️ Baixar Excel completo",
-                        data=st.session_state.arquivo_excel_completo,
-                        file_name=f"catalogo_completo_{datetime.datetime.now():%Y-%m-%d}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="baixar_excel_tudo",
-                        use_container_width=True,
-                    )
-            with col_exportar_modelo:
-                if st.button("🗂️ Preparar Excel por modelo", key="preparar_excel_modelo", use_container_width=True):
-                    with st.spinner("Baixando fotos e montando os arquivos por modelo..."):
-                        st.session_state.arquivos_excel_por_modelo = criar_zip_excel_por_modelo(df_dados)
-                if st.session_state.get("arquivos_excel_por_modelo"):
-                    st.download_button(
-                        "⬇️ Baixar ZIP por modelo",
-                        data=st.session_state.arquivos_excel_por_modelo,
-                        file_name=f"catalogos_por_modelo_{datetime.datetime.now():%Y-%m-%d}.zip",
-                        mime="application/zip",
-                        key="baixar_excel_modelo",
-                        use_container_width=True,
-                    )
+            modelos_normalizados = df_dados["Modelo"].fillna("SEM MODELO").astype(str).str.strip().replace("", "SEM MODELO")
+            opcoes_modelo = sorted(modelos_normalizados.unique(), key=str.casefold)
+            modelo_exportacao = st.selectbox("Modelo para exportar", opcoes_modelo, key="modelo_para_exportar")
+            dados_do_modelo = df_dados[modelos_normalizados == modelo_exportacao]
+            st.caption(f"{len(dados_do_modelo)} item(ns) serão incluídos neste Excel.")
+
+            if st.button("📄 Preparar Excel do modelo", key="preparar_excel_modelo_escolhido", use_container_width=True):
+                with st.spinner(f"Baixando fotos e montando o Excel de {modelo_exportacao}..."):
+                    st.session_state.arquivo_excel_modelo = criar_excel_de_um_modelo(modelo_exportacao, dados_do_modelo)
+                    st.session_state.modelo_excel_gerado = modelo_exportacao
+
+            if (
+                st.session_state.get("arquivo_excel_modelo")
+                and st.session_state.get("modelo_excel_gerado") == modelo_exportacao
+            ):
+                st.download_button(
+                    "⬇️ Baixar Excel do modelo",
+                    data=st.session_state.arquivo_excel_modelo,
+                    file_name=f"catalogo_{slug(modelo_exportacao)}_{datetime.datetime.now():%Y-%m-%d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="baixar_excel_modelo_escolhido",
+                    use_container_width=True,
+                )
 
         if total_itens > 0:
             ITENS_POR_PAGINA = 20
