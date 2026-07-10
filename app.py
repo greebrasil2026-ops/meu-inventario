@@ -473,14 +473,20 @@ def preparar_imagem_excel(conteudo):
     """Garante que a imagem seja aceita pelo Excel (JPEG/PNG/GIF/BMP)."""
     if not conteudo:
         return None
-    if conteudo.startswith((b"\xff\xd8\xff", b"\x89PNG", b"GIF87a", b"GIF89a", b"BM")):
-        return io.BytesIO(conteudo)
     try:
         # WebP, por exemplo, é convertido para JPEG antes de ser incorporado.
         from PIL import Image
-        imagem = Image.open(io.BytesIO(conteudo)).convert("RGB")
+        imagem = Image.open(io.BytesIO(conteudo)).convert("RGBA")
+        tamanho_caixa = 120
+        imagem.thumbnail((tamanho_caixa, tamanho_caixa), Image.Resampling.LANCZOS)
+        fundo = Image.new("RGBA", (tamanho_caixa, tamanho_caixa), "white")
+        posicao = (
+            (tamanho_caixa - imagem.width) // 2,
+            (tamanho_caixa - imagem.height) // 2,
+        )
+        fundo.alpha_composite(imagem, dest=posicao)
         saida = io.BytesIO()
-        imagem.save(saida, format="JPEG", quality=88)
+        fundo.convert("RGB").save(saida, format="JPEG", quality=90)
         saida.seek(0)
         return saida
     except Exception:
@@ -515,7 +521,7 @@ def criar_excel_modelo(modelo, dados_modelo, imagens):
         planilha.set_column("B:B", 24)
         planilha.set_column("C:C", 16)
         planilha.set_column("D:D", 20)
-        planilha.set_column("E:E", 26)
+        planilha.set_column("E:E", 18)
         planilha.freeze_panes(2, 0)
         planilha.autofilter(1, 0, len(dados_modelo) + 1, 4)
 
@@ -528,8 +534,7 @@ def criar_excel_modelo(modelo, dados_modelo, imagens):
             if foto:
                 planilha.write_blank(linha_excel, 4, None, estilo_texto)
                 planilha.insert_image(linha_excel, 4, "imagem.jpg", {
-                    "image_data": foto, "x_scale": 0.23, "y_scale": 0.23,
-                    "x_offset": 5, "y_offset": 4, "object_position": 1,
+                    "image_data": foto, "x_offset": 5, "y_offset": 4, "object_position": 1,
                 })
             else:
                 planilha.write(linha_excel, 4, "Imagem indisponível", estilo_aviso)
