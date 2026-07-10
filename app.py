@@ -784,7 +784,11 @@ if "excluindo_codigo" not in st.session_state: st.session_state.excluindo_codigo
 key_suffix = st.session_state.form_counter
 
 usuario_logado = st.session_state.get('usuario_logado', '')
-perfil_usuario = st.session_state.get("perfil_usuario", "usuario")
+perfil_usuario = str(st.session_state.get("perfil_usuario", "usuario")).strip().lower()
+
+# Perfis: admin administra contas; engenharia pode alterar o catálogo;
+# usuario apenas consulta o catálogo e o histórico.
+pode_gerenciar_catalogo = perfil_usuario in {"admin", "engenharia"}
 
 if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
     st.sidebar.divider()
@@ -795,7 +799,10 @@ if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
         with st.form("form_criar_usuario", clear_on_submit=True):
             novo_usuario = st.text_input("Novo usuario").strip()
             nova_senha = st.text_input("Senha inicial", type="password")
-            novo_perfil = st.selectbox("Permissao", ["usuario", "admin"], format_func=lambda p: "Administrador" if p == "admin" else "Usuario")
+            novo_perfil = st.selectbox(
+                "Permissao", ["usuario", "engenharia", "admin"],
+                format_func=lambda p: {"admin": "Administrador", "engenharia": "Engenharia", "usuario": "Usuário"}[p],
+            )
             criar_usuario = st.form_submit_button("Criar conta", use_container_width=True)
         if criar_usuario:
             if not novo_usuario or not nova_senha:
@@ -808,7 +815,11 @@ if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
 
         with st.form("form_alterar_perfil", clear_on_submit=True):
             usuario_perfil = st.text_input("Usuario para alterar permissao").strip()
-            perfil_novo = st.selectbox("Nova permissao", ["usuario", "admin"], format_func=lambda p: "Administrador" if p == "admin" else "Usuario", key="perfil_novo")
+            perfil_novo = st.selectbox(
+                "Nova permissao", ["usuario", "engenharia", "admin"],
+                format_func=lambda p: {"admin": "Administrador", "engenharia": "Engenharia", "usuario": "Usuário"}[p],
+                key="perfil_novo",
+            )
             salvar_perfil = st.form_submit_button("Salvar permissao", use_container_width=True)
         if salvar_perfil:
             if not usuario_perfil:
@@ -918,6 +929,9 @@ st.markdown("""
 # =============================================================================
 if st.session_state.pagina_app == "catalogo":
 
+    if not pode_gerenciar_catalogo:
+        st.sidebar.info("👁️ Perfil de consulta: você pode apenas visualizar o catálogo.")
+
     st.sidebar.header("📸 Adicionar Novo Item")
     origem = st.sidebar.radio("Selecione o método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"], key=f"origem_{key_suffix}")
 
@@ -940,7 +954,11 @@ if st.session_state.pagina_app == "catalogo":
         input_ambiente = st.sidebar.selectbox("UNIDADE:", ["Externa", "Interna"], key=f"ambiente_{key_suffix}")
         input_codigo = st.sidebar.text_input("CÓDIGO:", key=f"codigo_{key_suffix}").strip().upper()
 
-        if st.sidebar.button("💾 Enviar Direto para o Sistema", key=f"btn_enviar_{key_suffix}"):
+        if st.sidebar.button(
+            "💾 Enviar Direto para o Sistema",
+            key=f"btn_enviar_{key_suffix}",
+            disabled=not pode_gerenciar_catalogo,
+        ):
             if input_serie and input_modelo and input_codigo and URL_PLANILHA:
                 with st.spinner("Enviando foto para o Drive..."):
                     bytes_imagem_envio = foto_com_dados.getvalue()
@@ -964,7 +982,7 @@ if st.session_state.pagina_app == "catalogo":
                 st.sidebar.warning("Preencha Série, Modelo e Código antes de enviar.")
 
     # --- CAIXA DE EDIÇÃO (aparece quando um item foi clicado para editar) ---
-    if st.session_state.editando_codigo is not None:
+    if pode_gerenciar_catalogo and st.session_state.editando_codigo is not None:
         dados = st.session_state.get("editando_dados", {})
         st.markdown('<div id="formulario-edicao"></div>', unsafe_allow_html=True)
         st.markdown(
@@ -1028,7 +1046,7 @@ if st.session_state.pagina_app == "catalogo":
                 st.warning("Preencha Série, Modelo e Código antes de salvar.")
 
     # --- CAIXA DE EXCLUSÃO (aparece quando um item foi clicado para excluir) ---
-    if st.session_state.excluindo_codigo is not None:
+    if pode_gerenciar_catalogo and st.session_state.excluindo_codigo is not None:
         dados_exc = st.session_state.get("excluindo_dados", {})
         st.markdown('<div id="formulario-exclusao"></div>', unsafe_allow_html=True)
         st.markdown(
@@ -1213,7 +1231,10 @@ if st.session_state.pagina_app == "catalogo":
                         col_btn_editar, col_btn_excluir = st.columns(2)
                         with col_btn_editar:
                             st.markdown('<div class="btn-editar">', unsafe_allow_html=True)
-                            if st.button("✏️ Editar", key=f"editar_{chave_item}", use_container_width=True):
+                            if st.button(
+                                "✏️ Editar", key=f"editar_{chave_item}",
+                                use_container_width=True, disabled=not pode_gerenciar_catalogo,
+                            ):
                                 st.session_state.editando_codigo = linha["Código"]
                                 st.session_state.editando_dados = linha.to_dict()
                                 st.session_state.excluindo_codigo = None
@@ -1223,7 +1244,10 @@ if st.session_state.pagina_app == "catalogo":
                             st.markdown('</div>', unsafe_allow_html=True)
                         with col_btn_excluir:
                             st.markdown('<div class="btn-excluir">', unsafe_allow_html=True)
-                            if st.button("🗑️ Excluir", key=f"excluir_{chave_item}", use_container_width=True):
+                            if st.button(
+                                "🗑️ Excluir", key=f"excluir_{chave_item}",
+                                use_container_width=True, disabled=not pode_gerenciar_catalogo,
+                            ):
                                 st.session_state.excluindo_codigo = linha["Código"]
                                 st.session_state.excluindo_dados = linha.to_dict()
                                 st.session_state.editando_codigo = None
