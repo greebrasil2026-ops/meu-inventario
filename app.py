@@ -750,6 +750,112 @@ def criar_excel_de_um_modelo(modelo, dados_modelo):
     return criar_excel_modelo(modelo, dados_modelo, imagens)
 
 
+def extrair_codigos(texto):
+    """Aceita códigos separados por linha, espaço, vírgula ou ponto e vírgula."""
+    codigos = []
+    codigos_vistos = set()
+    for codigo in re.split(r"[\s,;]+", texto or ""):
+        codigo = codigo.strip().upper()
+        if codigo and codigo.casefold() not in codigos_vistos:
+            codigos.append(codigo)
+            codigos_vistos.add(codigo.casefold())
+    return codigos
+
+
+def criar_excel_por_codigos(codigos, dados):
+    """Cria um Excel com Código na coluna A e a foto incorporada na coluna B."""
+    dados = dados.copy()
+    dados["_codigo_normalizado"] = (
+        dados["Código"].fillna("").astype(str).str.strip().str.upper()
+    )
+
+    # Mantém a ordem em que os códigos foram colados. Em caso de código
+    # duplicado na planilha, usa a primeira ocorrência.
+    por_codigo = {}
+    for indice, item in dados.iterrows():
+        codigo_normalizado = item["_codigo_normalizado"]
+        if codigo_normalizado and codigo_normalizado not in por_codigo:
+            por_codigo[codigo_normalizado] = (indice, item)
+
+    imagens = {}
+    with ThreadPoolExecutor(max_workers=min(8, max(1, len(codigos)))) as executor:
+        futuros = {}
+        for codigo in codigos:
+            registro = por_codigo.get(codigo)
+            if registro:
+                _, item = registro
+                futuros[executor.submit(baixar_imagem_para_excel, item.get("Imagem"))] = codigo
+        for futuro in as_completed(futuros):
+            imagens[futuros[futuro]] = futuro.result()
+
+    arquivo = io.BytesIO()
+    with pd.ExcelWriter(
+        arquivo,
+        engine="xlsxwriter",
+        engine_kwargs={"options": {"strings_to_formulas": False, "strings_to_urls": False}},
+    ) as escritor:
+        workbook = escritor.book
+        planilha = workbook.add_worksheet("Fotos")
+        escritor.sheets["Fotos"] = planilha
+
+        estilo_cabecalho = workbook.add_format({
+            "bold": True,
+            "font_color": "FFFFFF",
+            "bg_color": "4338CA",
+            "border": 1,
+            "align": "center",
+            "valign": "vcenter",
+        })
+        estilo_codigo = workbook.add_format({
+            "border": 1,
+            "border_color": "E2E8F0",
+            "valign": "vcenter",
+        })
+        estilo_foto = workbook.add_format({
+            "border": 1,
+            "border_color": "E2E8F0",
+            "align": "center",
+            "valign": "vcenter",
+        })
+        estilo_aviso = workbook.add_format({
+            "border": 1,
+            "border_color": "E2E8F0",
+            "font_color": "991B1B",
+            "italic": True,
+            "align": "center",
+            "valign": "vcenter",
+        })
+
+        planilha.write(0, 0, "Código", estilo_cabecalho)
+        planilha.write(0, 1, "Foto", estilo_cabecalho)
+        planilha.set_row(0, 24)
+        planilha.set_column("A:A", 24)
+        planilha.set_column("B:B", 19)
+        planilha.freeze_panes(1, 0)
+        planilha.autofilter(0, 0, len(codigos), 1)
+
+        for linha_excel, codigo in enumerate(codigos, start=1):
+            planilha.set_row(linha_excel, 96)
+            planilha.write_string(linha_excel, 0, codigo, estilo_codigo)
+
+            registro = por_codigo.get(codigo)
+            foto = preparar_imagem_excel(imagens.get(codigo)) if registro else None
+            if foto:
+                planilha.write_blank(linha_excel, 1, None, estilo_foto)
+                planilha.insert_image(linha_excel, 1, f"{slug(codigo)}.jpg", {
+                    "image_data": foto,
+                    "x_offset": 5,
+                    "y_offset": 4,
+                    "object_position": 1,
+                })
+            elif registro:
+                planilha.write(linha_excel, 1, "Imagem indisponível", estilo_aviso)
+            else:
+                planilha.write(linha_excel, 1, "Código não encontrado", estilo_aviso)
+
+    return arquivo.getvalue()
+
+
 def enviar_para_backend(payload: dict) -> tuple:
     """Envia qualquer ação (criar/editar/excluir) para o Apps Script.
     Retorna (sucesso: bool, mensagem: str)."""
@@ -1128,6 +1234,52 @@ if st.session_state.pagina_app == "catalogo":
         if busca_c: df_filtrado = df_filtrado[df_filtrado['Código'].astype(str).str.contains(busca_c, na=False)]
 
         total_itens = len(df_filtrado)
+
+        # ---------------------------------------------------------------------
+        # EXPORTAÇÃO POR LISTA DE CÓDIGOS: gera somente Código + Foto e mantém
+        # a ordem em que os códigos foram informados pelo usuário.
+        # ---------------------------------------------------------------------
+        with st.expander("📸 Exportar fotos por códigos", expanded=True):
+            st.write(
+                "Cole 10, 20 ou mais códigos abaixo, separados por linha, espaço, "
+                "vírgula ou ponto e vírgula. O Excel terá o código na coluna A e "
+                "a foto incorporada na coluna B."
+            )
+            texto_codigos = st.text_area(
+                "Códigos para exportar",
+                height=170,
+                placeholder="Exemplo:\nCOD001\nCOD002\nCOD003",
+                key="codigos_para_excel",
+            )
+            codigos_exportacao = extrair_codigos(texto_codigos)
+            st.caption(f"{len(codigos_exportacao)} código(s) válido(s) informado(s).")
+
+            if st.button(
+                "📄 Preparar Excel com as fotos",
+                key="preparar_excel_por_codigos",
+                use_container_width=True,
+                disabled=not codigos_exportacao,
+            ):
+                with st.spinner(
+                    f"Localizando {len(codigos_exportacao)} código(s), baixando as fotos e montando o Excel..."
+                ):
+                    st.session_state.arquivo_excel_codigos = criar_excel_por_codigos(
+                        codigos_exportacao, df_dados
+                    )
+                    st.session_state.codigos_excel_gerado = tuple(codigos_exportacao)
+
+            if (
+                st.session_state.get("arquivo_excel_codigos")
+                and st.session_state.get("codigos_excel_gerado") == tuple(codigos_exportacao)
+            ):
+                st.download_button(
+                    "⬇️ Baixar Excel com código e foto",
+                    data=st.session_state.arquivo_excel_codigos,
+                    file_name=f"fotos_por_codigos_{datetime.datetime.now():%Y-%m-%d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="baixar_excel_por_codigos",
+                    use_container_width=True,
+                )
 
         # ---------------------------------------------------------------------
         # EXPORTAÇÃO POR MODELO: baixa apenas o modelo escolhido, com os dados
