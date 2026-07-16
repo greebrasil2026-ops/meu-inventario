@@ -464,6 +464,7 @@ if "auth" in st.secrets and "usuarios" in st.secrets["auth"]:
 
 USAR_GESTAO_USUARIOS = bool(st.secrets.get("auth", {}).get("gerenciar_usuarios", False))
 ADMINISTRADORES = set(st.secrets.get("auth", {}).get("administradores", []))
+ENGENHEIROS = set(st.secrets.get("auth", {}).get("engenheiros", []))
 CHAVE_ADMIN = st.secrets.get("auth", {}).get("admin_api_key", "")
 
 
@@ -515,7 +516,12 @@ if not st.session_state.autenticado:
             elif usuario_input in USUARIOS_VALIDOS and USUARIOS_VALIDOS[usuario_input] == senha_input:
                 st.session_state.autenticado = True
                 st.session_state.usuario_logado = usuario_input
-                st.session_state.perfil_usuario = "admin" if usuario_input in ADMINISTRADORES else "usuario"
+                if usuario_input in ADMINISTRADORES:
+                    st.session_state.perfil_usuario = "admin"
+                elif usuario_input in ENGENHEIROS:
+                    st.session_state.perfil_usuario = "engenharia"
+                else:
+                    st.session_state.perfil_usuario = "usuario"
                 st.rerun()
             else:
                 st.error("Usuário ou senha incorretos.")
@@ -533,6 +539,43 @@ URL_BASE_DADOS = "https://docs.google.com/spreadsheets/d/1C5bL1iEyNdjPJBEPgCTW4Z
 
 PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
 
+def normalizar_perfil(valor: str) -> str:
+    """Padroniza os nomes de perfil recebidos do backend ou dos Secrets."""
+    perfil = str(valor or "usuario").strip().casefold()
+    aliases = {
+        "admin": "admin",
+        "administrador": "admin",
+        "engenharia": "engenharia",
+        "usuario": "usuario",
+        "usuário": "usuario",
+    }
+    return aliases.get(perfil, "usuario")
+
+
+@st.cache_data(show_spinner=False, ttl=300)
+def carregar_modelos_existentes():
+    """Lê somente a coluna Modelo para preencher o cadastro.
+
+    Se a leitura falhar, o campo continua aceitando um modelo digitado.
+    """
+    try:
+        consulta = quote("select B where B is not null")
+        url_modelos = f"{URL_BASE_DADOS}/gviz/tq?tqx=out:csv&tq={consulta}"
+        resposta = requests.get(url_modelos, timeout=20)
+        resposta.raise_for_status()
+        dados_modelos = pd.read_csv(io.StringIO(resposta.text))
+        if dados_modelos.empty or len(dados_modelos.columns) == 0:
+            return []
+        modelos = {
+            str(valor).strip().upper()
+            for valor in dados_modelos.iloc[:, 0].dropna()
+            if str(valor).strip()
+        }
+        return sorted(modelos, key=str.casefold)
+    except Exception:
+        return []
+
+
 def extrair_id_drive(valor: str):
     m = PADRAO_ID_DRIVE.search(valor)
     return m.group(0) if m else valor
@@ -545,6 +588,14 @@ def slug(valor: str) -> str:
     """Deixa o texto seguro para usar em nome de arquivo / id de HTML / key do Streamlit."""
     valor = str(valor or "item")
     return re.sub(r"[^A-Za-z0-9_-]+", "_", valor).strip("_") or "item"
+
+def arquivo_para_data_uri(arquivo) -> str:
+    """Converte JPG, PNG ou WebP mantendo o MIME real do arquivo."""
+    tipo = str(getattr(arquivo, "type", "") or "image/jpeg").strip().lower()
+    if not tipo.startswith("image/"):
+        tipo = "image/jpeg"
+    conteudo = base64.b64encode(arquivo.getvalue()).decode("utf-8")
+    return f"data:{tipo};base64,{conteudo}"
 
 def rolar_para_formulario(elemento_id: str) -> None:
     """Leva a janela até o formulário aberto após clicar em Editar ou Excluir."""
@@ -890,11 +941,15 @@ if "excluindo_codigo" not in st.session_state: st.session_state.excluindo_codigo
 key_suffix = st.session_state.form_counter
 
 usuario_logado = st.session_state.get('usuario_logado', '')
-perfil_usuario = str(st.session_state.get("perfil_usuario", "usuario")).strip().lower()
+perfil_usuario = normalizar_perfil(st.session_state.get("perfil_usuario", "usuario"))
 
 # Perfis: admin administra contas; engenharia pode alterar o catálogo;
 # usuario apenas consulta o catálogo e o histórico.
 pode_gerenciar_catalogo = perfil_usuario in {"admin", "engenharia"}
+
+# Permissão separada para evitar que uma futura mudança na edição do catálogo
+# libere, por engano, exportações ou download de fotos.
+pode_baixar_arquivos = perfil_usuario in {"admin", "engenharia"}
 
 if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
     st.sidebar.divider()
@@ -948,7 +1003,8 @@ if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
                 (st.success if sucesso else st.error)("Senha redefinida com sucesso." if sucesso else mensagem)
 st.sidebar.markdown(f"👤 Logado como **{usuario_logado}**")
 if st.sidebar.button("🚪 Sair", key="btn_logout"):
-    st.session_state.autenticado = False
+    # Remove também perfil, arquivos Excel gerados e estados administrativos.
+    st.session_state.clear()
     st.rerun()
 
 st.sidebar.divider()
@@ -1038,56 +1094,91 @@ if st.session_state.pagina_app == "catalogo":
     if not pode_gerenciar_catalogo:
         st.sidebar.info("👁️ Perfil de consulta: você pode apenas visualizar o catálogo.")
 
-    st.sidebar.header("📸 Adicionar Novo Item")
-    origem = st.sidebar.radio("Selecione o método:", ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"], key=f"origem_{key_suffix}")
-
-    foto_com_dados = None
-    if origem == "Tirar Foto (Celular/PC)":
-        foto_com_dados = st.sidebar.camera_input("Aponte a câmera para o componente", key=f"camera_{key_suffix}")
-        st.sidebar.caption(
-            "⚠️ Se a câmera não aparecer: o navegador precisa da sua permissão. "
-            "Clique no ícone de cadeado/câmera na barra de endereço e escolha "
-            "'Permitir'. Isso só funciona em endereços com HTTPS (o Streamlit "
-            "Cloud já usa HTTPS por padrão)."
+    if pode_gerenciar_catalogo:
+        st.sidebar.header("📸 Adicionar Novo Item")
+        origem = st.sidebar.radio(
+            "Selecione o método:",
+            ["Tirar Foto (Celular/PC)", "Subir da Galeria de Fotos"],
+            key=f"origem_{key_suffix}",
         )
-    else:
-        foto_com_dados = st.sidebar.file_uploader("Escolha a imagem", type=["jpg", "jpeg", "png", "webp"], key=f"upload_{key_suffix}")
 
-    if foto_com_dados is not None:
-        st.sidebar.subheader("📝 Informações de Registro")
-        input_serie = st.sidebar.text_input("SÉRIE:", key=f"serie_{key_suffix}").strip().upper()
-        input_modelo = st.sidebar.text_input("MODELO:", key=f"modelo_{key_suffix}").strip().upper()
-        input_ambiente = st.sidebar.selectbox(
-            "UNIDADE:", ["Painel", "Interna", "Externa"], key=f"ambiente_{key_suffix}"
-        )
-        input_codigo = st.sidebar.text_input("CÓDIGO:", key=f"codigo_{key_suffix}").strip().upper()
+        foto_com_dados = None
+        if origem == "Tirar Foto (Celular/PC)":
+            foto_com_dados = st.sidebar.camera_input(
+                "Aponte a câmera para o componente",
+                key=f"camera_{key_suffix}",
+            )
+            st.sidebar.caption(
+                "⚠️ Se a câmera não aparecer: o navegador precisa da sua permissão. "
+                "Clique no ícone de cadeado/câmera na barra de endereço e escolha "
+                "'Permitir'. Isso só funciona em endereços com HTTPS (o Streamlit "
+                "Cloud já usa HTTPS por padrão)."
+            )
+        else:
+            foto_com_dados = st.sidebar.file_uploader(
+                "Escolha a imagem",
+                type=["jpg", "jpeg", "png", "webp"],
+                key=f"upload_{key_suffix}",
+            )
 
-        if st.sidebar.button(
-            "💾 Enviar Direto para o Sistema",
-            key=f"btn_enviar_{key_suffix}",
-            disabled=not pode_gerenciar_catalogo,
-        ):
-            if input_serie and input_modelo and input_codigo and URL_PLANILHA:
-                with st.spinner("Enviando foto para o Drive..."):
-                    bytes_imagem_envio = foto_com_dados.getvalue()
-                    dados_envio = {
-                        "acao": "criar",
-                        "serie": input_serie,
-                        "modelo": input_modelo,
-                        "ambiente": input_ambiente,
-                        "codigo": input_codigo,
-                        "imagem": f"data:image/jpeg;base64,{base64.b64encode(bytes_imagem_envio).decode('utf-8')}",
-                        "usuario": usuario_logado,
-                    }
-                    sucesso, msg = enviar_para_backend(dados_envio)
-                    if sucesso:
-                        st.sidebar.success("✅ Salvo com sucesso!")
-                        st.session_state.form_counter += 1
-                        st.rerun()
-                    else:
-                        st.sidebar.error(f"⚠️ {msg}")
-            else:
-                st.sidebar.warning("Preencha Série, Modelo e Código antes de enviar.")
+        if foto_com_dados is not None:
+            st.sidebar.subheader("📝 Informações de Registro")
+            st.sidebar.caption("Campos obrigatórios: Foto e Código.")
+
+            input_serie = st.sidebar.text_input(
+                "SÉRIE (opcional):",
+                key=f"serie_{key_suffix}",
+            ).strip().upper()
+
+            input_modelo_bruto = st.sidebar.selectbox(
+                "MODELO (opcional):",
+                options=carregar_modelos_existentes(),
+                index=None,
+                placeholder="Escolha um modelo ou digite um novo",
+                accept_new_options=True,
+                key=f"modelo_{key_suffix}",
+            )
+            input_modelo = str(input_modelo_bruto or "").strip().upper()
+
+            input_ambiente = st.sidebar.selectbox(
+                "UNIDADE (opcional):",
+                ["Painel", "Interna", "Externa"],
+                index=None,
+                placeholder="Selecione a unidade",
+                key=f"ambiente_{key_suffix}",
+            ) or ""
+
+            input_codigo = st.sidebar.text_input(
+                "CÓDIGO *:",
+                key=f"codigo_{key_suffix}",
+            ).strip().upper()
+
+            if st.sidebar.button(
+                "💾 Enviar Direto para o Sistema",
+                key=f"btn_enviar_{key_suffix}",
+                disabled=not bool(input_codigo),
+            ):
+                if not URL_PLANILHA:
+                    st.sidebar.error("⚠️ A URL do sistema não foi configurada.")
+                else:
+                    with st.spinner("Enviando foto para o Drive..."):
+                        dados_envio = {
+                            "acao": "criar",
+                            "serie": input_serie,
+                            "modelo": input_modelo,
+                            "ambiente": input_ambiente,
+                            "codigo": input_codigo,
+                            "imagem": arquivo_para_data_uri(foto_com_dados),
+                            "usuario": usuario_logado,
+                        }
+                        sucesso, msg = enviar_para_backend(dados_envio)
+                        if sucesso:
+                            st.sidebar.success("✅ Salvo com sucesso!")
+                            st.session_state.form_counter += 1
+                            st.cache_data.clear()
+                            st.rerun()
+                        else:
+                            st.sidebar.error(f"⚠️ {msg}")
 
     # --- CAIXA DE EDIÇÃO (aparece quando um item foi clicado para editar) ---
     if pode_gerenciar_catalogo and st.session_state.editando_codigo is not None:
@@ -1101,13 +1192,19 @@ if st.session_state.pagina_app == "catalogo":
         with st.form("form_editar_item", clear_on_submit=False):
             col_e1, col_e2, col_e3, col_e4 = st.columns(4)
             with col_e1:
-                edit_serie = st.text_input("Série", value=dados.get("Série", "")).strip().upper()
+                edit_serie = st.text_input("Série (opcional)", value=dados.get("Série", "")).strip().upper()
             with col_e2:
-                edit_modelo = st.text_input("Modelo", value=dados.get("Modelo", "")).strip().upper()
+                edit_modelo = st.text_input("Modelo (opcional)", value=dados.get("Modelo", "")).strip().upper()
             with col_e3:
-                ambientes = ["Painel", "Interna", "Externa"]
-                idx_amb = ambientes.index(dados.get("Ambiente")) if dados.get("Ambiente") in ambientes else 0
-                edit_ambiente = st.selectbox("Unidade", ambientes, index=idx_amb)
+                ambientes = ["", "Painel", "Interna", "Externa"]
+                ambiente_atual = str(dados.get("Ambiente", "") or "").strip()
+                idx_amb = ambientes.index(ambiente_atual) if ambiente_atual in ambientes else 0
+                edit_ambiente = st.selectbox(
+                    "Unidade (opcional)",
+                    ambientes,
+                    index=idx_amb,
+                    format_func=lambda valor: valor or "Não informado",
+                )
             with col_e4:
                 edit_codigo = st.text_input("Código", value=dados.get("Código", "")).strip().upper()
 
@@ -1129,7 +1226,7 @@ if st.session_state.pagina_app == "catalogo":
             st.rerun()
 
         if salvar_edicao:
-            if edit_serie and edit_modelo and edit_codigo:
+            if edit_codigo:
                 payload_edicao = {
                     "acao": "editar",
                     "codigo_original": st.session_state.editando_codigo,
@@ -1140,7 +1237,7 @@ if st.session_state.pagina_app == "catalogo":
                     "usuario": usuario_logado,
                 }
                 if edit_nova_foto is not None:
-                    payload_edicao["imagem"] = f"data:image/jpeg;base64,{base64.b64encode(edit_nova_foto.getvalue()).decode('utf-8')}"
+                    payload_edicao["imagem"] = arquivo_para_data_uri(edit_nova_foto)
                 sucesso, msg = enviar_para_backend(payload_edicao)
                 if sucesso:
                     st.success("✅ Item atualizado com sucesso!")
@@ -1151,7 +1248,7 @@ if st.session_state.pagina_app == "catalogo":
                 else:
                     st.error(f"⚠️ {msg}")
             else:
-                st.warning("Preencha Série, Modelo e Código antes de salvar.")
+                st.warning("Informe o Código antes de salvar.")
 
     # --- CAIXA DE EXCLUSÃO (aparece quando um item foi clicado para excluir) ---
     if pode_gerenciar_catalogo and st.session_state.excluindo_codigo is not None:
@@ -1222,6 +1319,13 @@ if st.session_state.pagina_app == "catalogo":
         conexao = st.connection("gsheets", type=GSheetsConnection)
         df_dados = conexao.read(ttl=ttl_planilha)
         df_dados.columns = ["Série", "Modelo", "Ambiente", "Código", "Imagem"]
+
+        # Como Série, Modelo e Unidade agora são opcionais, normalizamos as
+        # células vazias para evitar "nan" nos cards e falhas nos filtros.
+        df_dados = df_dados.fillna("")
+        for coluna_texto in ["Série", "Modelo", "Ambiente", "Código", "Imagem"]:
+            df_dados[coluna_texto] = df_dados[coluna_texto].astype(str).str.strip()
+
         df_filtrado = df_dados.copy()
         if busca_s: df_filtrado = df_filtrado[df_filtrado['Série'].str.upper().str.contains(busca_s, na=False)]
         if busca_m: df_filtrado = df_filtrado[df_filtrado['Modelo'].str.upper().str.contains(busca_m, na=False)]
@@ -1235,84 +1339,104 @@ if st.session_state.pagina_app == "catalogo":
 
         total_itens = len(df_filtrado)
 
-        # ---------------------------------------------------------------------
-        # EXPORTAÇÃO POR LISTA DE CÓDIGOS: gera somente Código + Foto e mantém
-        # a ordem em que os códigos foram informados pelo usuário.
-        # ---------------------------------------------------------------------
-        with st.expander("📸 Exportar fotos por códigos", expanded=True):
-            st.write(
-                "Cole 10, 20 ou mais códigos abaixo, separados por linha, espaço, "
-                "vírgula ou ponto e vírgula. O Excel terá o código na coluna A e "
-                "a foto incorporada na coluna B."
-            )
-            texto_codigos = st.text_area(
-                "Códigos para exportar",
-                height=170,
-                placeholder="Exemplo:\nCOD001\nCOD002\nCOD003",
-                key="codigos_para_excel",
-            )
-            codigos_exportacao = extrair_codigos(texto_codigos)
-            st.caption(f"{len(codigos_exportacao)} código(s) válido(s) informado(s).")
+        # Exportações são renderizadas somente para Engenharia e Administrador.
+        # O perfil Usuário não consegue nem preparar o arquivo em memória.
+        if pode_baixar_arquivos:
+            # -----------------------------------------------------------------
+            # EXPORTAÇÃO POR LISTA DE CÓDIGOS: gera Código + Foto e mantém a
+            # ordem em que os códigos foram informados.
+            # -----------------------------------------------------------------
+            with st.expander("📸 Exportar fotos por códigos", expanded=True):
+                st.write(
+                    "Cole 10, 20 ou mais códigos abaixo, separados por linha, espaço, "
+                    "vírgula ou ponto e vírgula. O Excel terá o código na coluna A e "
+                    "a foto incorporada na coluna B."
+                )
+                texto_codigos = st.text_area(
+                    "Códigos para exportar",
+                    height=170,
+                    placeholder="Exemplo:\nCOD001\nCOD002\nCOD003",
+                    key="codigos_para_excel",
+                )
+                codigos_exportacao = extrair_codigos(texto_codigos)
+                st.caption(f"{len(codigos_exportacao)} código(s) válido(s) informado(s).")
 
-            if st.button(
-                "📄 Preparar Excel com as fotos",
-                key="preparar_excel_por_codigos",
-                use_container_width=True,
-                disabled=not codigos_exportacao,
-            ):
-                with st.spinner(
-                    f"Localizando {len(codigos_exportacao)} código(s), baixando as fotos e montando o Excel..."
+                if st.button(
+                    "📄 Preparar Excel com as fotos",
+                    key="preparar_excel_por_codigos",
+                    use_container_width=True,
+                    disabled=not codigos_exportacao,
                 ):
-                    st.session_state.arquivo_excel_codigos = criar_excel_por_codigos(
-                        codigos_exportacao, df_dados
+                    with st.spinner(
+                        f"Localizando {len(codigos_exportacao)} código(s), baixando as fotos e montando o Excel..."
+                    ):
+                        st.session_state.arquivo_excel_codigos = criar_excel_por_codigos(
+                            codigos_exportacao, df_dados
+                        )
+                        st.session_state.codigos_excel_gerado = tuple(codigos_exportacao)
+
+                if (
+                    st.session_state.get("arquivo_excel_codigos")
+                    and st.session_state.get("codigos_excel_gerado") == tuple(codigos_exportacao)
+                ):
+                    st.download_button(
+                        "⬇️ Baixar Excel com código e foto",
+                        data=st.session_state.arquivo_excel_codigos,
+                        file_name=f"fotos_por_codigos_{datetime.datetime.now():%Y-%m-%d}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="baixar_excel_por_codigos",
+                        use_container_width=True,
                     )
-                    st.session_state.codigos_excel_gerado = tuple(codigos_exportacao)
 
-            if (
-                st.session_state.get("arquivo_excel_codigos")
-                and st.session_state.get("codigos_excel_gerado") == tuple(codigos_exportacao)
-            ):
-                st.download_button(
-                    "⬇️ Baixar Excel com código e foto",
-                    data=st.session_state.arquivo_excel_codigos,
-                    file_name=f"fotos_por_codigos_{datetime.datetime.now():%Y-%m-%d}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="baixar_excel_por_codigos",
-                    use_container_width=True,
+            # -----------------------------------------------------------------
+            # EXPORTAÇÃO POR MODELO: baixa apenas o modelo escolhido, com dados
+            # e foto incorporada ao lado de cada código.
+            # -----------------------------------------------------------------
+            with st.expander("📥 Exportar catálogo para Excel", expanded=False):
+                st.write(
+                    "Escolha o modelo desejado. O Excel terá Série, Modelo, Ambiente, "
+                    "Código e a foto incorporada em cada linha."
                 )
-
-        # ---------------------------------------------------------------------
-        # EXPORTAÇÃO POR MODELO: baixa apenas o modelo escolhido, com os dados
-        # e a foto incorporada ao lado de cada código.
-        # ---------------------------------------------------------------------
-        with st.expander("📥 Exportar catálogo para Excel", expanded=False):
-            st.write(
-                "Escolha o modelo desejado. O Excel terá Série, Modelo, Ambiente, "
-                "Código e a foto incorporada em cada linha."
-            )
-            modelos_normalizados = df_dados["Modelo"].fillna("SEM MODELO").astype(str).str.strip().replace("", "SEM MODELO")
-            opcoes_modelo = sorted(modelos_normalizados.unique(), key=str.casefold)
-            modelo_exportacao = st.selectbox("Modelo para exportar", opcoes_modelo, key="modelo_para_exportar")
-            dados_do_modelo = df_dados[modelos_normalizados == modelo_exportacao]
-            st.caption(f"{len(dados_do_modelo)} item(ns) serão incluídos neste Excel.")
-
-            if st.button("📄 Preparar Excel do modelo", key="preparar_excel_modelo_escolhido", use_container_width=True):
-                with st.spinner(f"Baixando fotos e montando o Excel de {modelo_exportacao}..."):
-                    st.session_state.arquivo_excel_modelo = criar_excel_de_um_modelo(modelo_exportacao, dados_do_modelo)
-                    st.session_state.modelo_excel_gerado = modelo_exportacao
-
-            if (
-                st.session_state.get("arquivo_excel_modelo")
-                and st.session_state.get("modelo_excel_gerado") == modelo_exportacao
-            ):
-                st.download_button(
-                    "⬇️ Baixar Excel do modelo",
-                    data=st.session_state.arquivo_excel_modelo,
-                    file_name=f"catalogo_{slug(modelo_exportacao)}_{datetime.datetime.now():%Y-%m-%d}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="baixar_excel_modelo_escolhido",
-                    use_container_width=True,
+                modelos_normalizados = (
+                    df_dados["Modelo"]
+                    .fillna("SEM MODELO")
+                    .astype(str)
+                    .str.strip()
+                    .replace("", "SEM MODELO")
                 )
+                opcoes_modelo = sorted(modelos_normalizados.unique(), key=str.casefold)
+                modelo_exportacao = st.selectbox(
+                    "Modelo para exportar",
+                    opcoes_modelo,
+                    key="modelo_para_exportar",
+                )
+                dados_do_modelo = df_dados[modelos_normalizados == modelo_exportacao]
+                st.caption(f"{len(dados_do_modelo)} item(ns) serão incluídos neste Excel.")
+
+                if st.button(
+                    "📄 Preparar Excel do modelo",
+                    key="preparar_excel_modelo_escolhido",
+                    use_container_width=True,
+                ):
+                    with st.spinner(f"Baixando fotos e montando o Excel de {modelo_exportacao}..."):
+                        st.session_state.arquivo_excel_modelo = criar_excel_de_um_modelo(
+                            modelo_exportacao,
+                            dados_do_modelo,
+                        )
+                        st.session_state.modelo_excel_gerado = modelo_exportacao
+
+                if (
+                    st.session_state.get("arquivo_excel_modelo")
+                    and st.session_state.get("modelo_excel_gerado") == modelo_exportacao
+                ):
+                    st.download_button(
+                        "⬇️ Baixar Excel do modelo",
+                        data=st.session_state.arquivo_excel_modelo,
+                        file_name=f"catalogo_{slug(modelo_exportacao)}_{datetime.datetime.now():%Y-%m-%d}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="baixar_excel_modelo_escolhido",
+                        use_container_width=True,
+                    )
 
         if total_itens > 0:
             ITENS_POR_PAGINA = 20
@@ -1361,13 +1485,21 @@ if st.session_state.pagina_app == "catalogo":
                         data_uri = resultados_imagens.get(idx)
 
                         if data_uri:
-                            html_foto = f'''
-                                <div class="foto-frame">
-                                    <a href="{data_uri}" download="{nome_arquivo}" title="Clique para baixar a foto">
-                                        <img src="{data_uri}" loading="lazy">
-                                    </a>
-                                </div>
-                            '''
+                            if pode_baixar_arquivos:
+                                html_foto = f'''
+                                    <div class="foto-frame">
+                                        <a href="{data_uri}" download="{nome_arquivo}" title="Clique para baixar a foto">
+                                            <img src="{data_uri}" loading="lazy">
+                                        </a>
+                                    </div>
+                                '''
+                            else:
+                                html_foto = f'''
+                                    <div class="foto-frame" oncontextmenu="return false;">
+                                        <img src="{data_uri}" loading="lazy" draggable="false"
+                                             style="cursor: default; -webkit-user-drag: none; user-select: none;">
+                                    </div>
+                                '''
                         else:
                             html_foto = '<div class="foto-indisponivel">⚠️ Imagem indisponível.</div>'
 
