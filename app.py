@@ -763,10 +763,11 @@ if "connections" in st.secrets and "google_script_url" in st.secrets["connection
 URL_BASE_DADOS = "https://docs.google.com/spreadsheets/d/1C5bL1iEyNdjPJBEPgCTW4ZWIDBSmo8Dj6vOLvunpMmg"
 
 PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
-# Compatibilidade com versões antigas do Apps Script que validam Série,
-# Modelo ou Unidade como obrigatórios. O caractere é visualmente vazio e é
-# removido novamente em toda leitura feita pelo app.
-VALOR_VAZIO_BACKEND_LEGADO = "\u200b"
+# Compatibilidade com implantações antigas do Apps Script que ainda validam
+# Série, Modelo ou Unidade como obrigatórios. A versão nova do backend converte
+# este marcador em vazio, e o Streamlit também o remove de toda exibição.
+VALOR_VAZIO_BACKEND_LEGADO = "__CAMPO_OPCIONAL_VAZIO__"
+MARCADORES_VAZIOS_BACKEND = ("\u200b", VALOR_VAZIO_BACKEND_LEGADO)
 
 def normalizar_perfil(valor: str) -> str:
     """Padroniza os nomes de perfil recebidos do backend ou dos Secrets."""
@@ -790,11 +791,14 @@ def limpar_campo_opcional(valor) -> str:
             return ""
     except (TypeError, ValueError):
         pass
-    return str(valor).replace(VALOR_VAZIO_BACKEND_LEGADO, "").strip()
+    texto = str(valor)
+    for marcador in MARCADORES_VAZIOS_BACKEND:
+        texto = texto.replace(marcador, "")
+    return texto.strip()
 
 
 def campo_opcional_para_backend_legado(valor) -> str:
-    """Fornece um valor invisível somente ao refazer uma requisição recusada."""
+    """Envia um marcador apenas quando o campo opcional está vazio."""
     texto = limpar_campo_opcional(valor)
     return texto if texto else VALOR_VAZIO_BACKEND_LEGADO
 
@@ -1523,9 +1527,11 @@ if st.session_state.pagina_app == "catalogo":
                     with st.spinner("Enviando foto para o Drive..."):
                         dados_envio = {
                             "acao": "criar",
-                            "serie": input_serie,
-                            "modelo": input_modelo,
-                            "ambiente": input_ambiente,
+                            # O marcador garante compatibilidade até com uma
+                            # implantação antiga que ainda exige estes campos.
+                            "serie": campo_opcional_para_backend_legado(input_serie),
+                            "modelo": campo_opcional_para_backend_legado(input_modelo),
+                            "ambiente": campo_opcional_para_backend_legado(input_ambiente),
                             "codigo": input_codigo,
                             "imagem": arquivo_para_data_uri(foto_com_dados),
                             "usuario": usuario_logado,
@@ -1537,7 +1543,18 @@ if st.session_state.pagina_app == "catalogo":
                             st.cache_data.clear()
                             st.rerun()
                         else:
-                            st.sidebar.error(f"⚠️ {msg}")
+                            mensagem_normalizada = texto_sem_acentos(msg)
+                            if "preencha serie" in mensagem_normalizada:
+                                st.sidebar.error(
+                                    "⚠️ O site está conectado a uma implantação antiga "
+                                    "do Google Apps Script."
+                                )
+                                st.sidebar.caption(
+                                    "Publique uma nova versão do backend e confirme que "
+                                    "google_script_url aponta para a URL /exec atual."
+                                )
+                            else:
+                                st.sidebar.error(f"⚠️ {msg}")
 
     # --- CAIXA DE EDIÇÃO (aparece quando um item foi clicado para editar) ---
     if pode_gerenciar_catalogo and st.session_state.editando_codigo is not None:
@@ -1589,9 +1606,9 @@ if st.session_state.pagina_app == "catalogo":
                 payload_edicao = {
                     "acao": "editar",
                     "codigo_original": st.session_state.editando_codigo,
-                    "serie": edit_serie,
-                    "modelo": edit_modelo,
-                    "ambiente": edit_ambiente,
+                    "serie": campo_opcional_para_backend_legado(edit_serie),
+                    "modelo": campo_opcional_para_backend_legado(edit_modelo),
+                    "ambiente": campo_opcional_para_backend_legado(edit_ambiente),
                     "codigo": edit_codigo,
                     "usuario": usuario_logado,
                 }
@@ -1682,8 +1699,14 @@ if st.session_state.pagina_app == "catalogo":
         # Como Série, Modelo e Unidade agora são opcionais, normalizamos as
         # células vazias para evitar "nan" nos cards e falhas nos filtros.
         df_dados = df_dados.fillna("")
-        for coluna_texto in ["Série", "Modelo", "Ambiente", "Código", "Imagem"]:
-            df_dados[coluna_texto] = df_dados[coluna_texto].astype(str).str.strip()
+        for coluna_opcional in ["Série", "Modelo", "Ambiente"]:
+            df_dados[coluna_opcional] = df_dados[coluna_opcional].map(
+                limpar_campo_opcional
+            )
+        for coluna_texto in ["Código", "Imagem"]:
+            df_dados[coluna_texto] = (
+                df_dados[coluna_texto].astype(str).str.strip()
+            )
 
         df_filtrado = df_dados.copy()
         if busca_s: df_filtrado = df_filtrado[df_filtrado['Série'].str.upper().str.contains(busca_s, na=False)]
@@ -1966,6 +1989,11 @@ else:
 
         df_historico.columns = colunas_esperadas
         df_historico = df_historico.dropna(how="all")
+        df_historico = df_historico.fillna("")
+        for coluna_opcional in ["Série", "Modelo", "Ambiente"]:
+            df_historico[coluna_opcional] = df_historico[coluna_opcional].map(
+                limpar_campo_opcional
+            )
 
         if filtro_acao != "Todas":
             mapa_acao = {"Criação": "criar", "Edição": "editar", "Exclusão": "excluir"}
