@@ -8,6 +8,7 @@ import io
 import zipfile
 import requests
 import datetime
+import unicodedata
 from urllib.parse import quote
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -37,6 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configuração da página para ocupar a tela inteira (layout wide para mosaico)
 st.set_page_config(page_title="Sistema de Catalogação Dinâmico", layout="wide", page_icon="📦")
+st.set_option("client.toolbarMode", "minimal")
 
 # --- ESTILIZAÇÃO CSS PROFISSIONAL ---
 st.markdown("""
@@ -44,6 +46,48 @@ st.markdown("""
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
     html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+
+    /* Remove as ações públicas do Streamlit Cloud (Share, editar, GitHub,
+    favoritos e menu), preservando o botão que abre a sidebar no celular. */
+    [data-testid="stToolbarActions"],
+    [data-testid="stAppDeployButton"],
+    [data-testid="stMainMenu"],
+    [data-testid="stStatusWidget"],
+    [data-testid="manage-app-button"],
+    #MainMenu,
+    [class*="viewerBadge"],
+    [class*="ViewerBadge"] {
+        display: none !important;
+        visibility: hidden !important;
+        pointer-events: none !important;
+    }
+
+    /* Proteção visual usada somente pelo perfil Usuário. Os campos de
+    formulário continuam selecionáveis para não atrapalhar a digitação. */
+    body.protecao-catalogo-ativa .imagem-protegida {
+        user-select: none !important;
+        -webkit-user-select: none !important;
+        -webkit-user-drag: none !important;
+        -webkit-touch-callout: none !important;
+    }
+    body.protecao-catalogo-captura [data-testid="stAppViewContainer"],
+    body.protecao-catalogo-captura section[data-testid="stSidebar"] {
+        filter: blur(28px) brightness(0.15) !important;
+        transition: none !important;
+    }
+    @media print {
+        body.protecao-catalogo-ativa > * {
+            display: none !important;
+        }
+        body.protecao-catalogo-ativa::after {
+            content: "Impressão bloqueada para este perfil.";
+            display: block !important;
+            padding: 40px;
+            color: #111827;
+            font-family: Arial, sans-serif;
+            font-size: 20px;
+        }
+    }
 
     /* Fundo geral suave */
     .stApp { background-color: #EEF1F6; }
@@ -453,6 +497,184 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+
+# Alguns elementos do cabeçalho são inseridos pelo Streamlit Cloud depois que
+# a página já carregou. Este observador remove apenas as ações públicas e não
+# toca no botão que expande a sidebar em telas pequenas.
+components.html(
+    """
+    <script>
+    (() => {
+        const win = window.parent;
+        const doc = win.document;
+
+        const ocultarAcoesDoCabecalho = () => {
+            const seletores = [
+                '[data-testid="stToolbarActions"]',
+                '[data-testid="stAppDeployButton"]',
+                '[data-testid="stMainMenu"]',
+                '[data-testid="stStatusWidget"]',
+                '[data-testid="manage-app-button"]',
+                '#MainMenu',
+                '[class*="viewerBadge"]',
+                '[class*="ViewerBadge"]'
+            ];
+
+            seletores.forEach(seletor => {
+                doc.querySelectorAll(seletor).forEach(elemento => {
+                    if (elemento.closest('[data-testid="stExpandSidebarButton"]')) return;
+                    elemento.style.setProperty('display', 'none', 'important');
+                    elemento.style.setProperty('visibility', 'hidden', 'important');
+                    elemento.style.setProperty('pointer-events', 'none', 'important');
+                });
+            });
+
+            const cabecalho = doc.querySelector('header[data-testid="stHeader"]');
+            if (!cabecalho) return;
+
+            cabecalho.querySelectorAll('button, a').forEach(elemento => {
+                if (elemento.closest('[data-testid="stExpandSidebarButton"]')) return;
+                const identificacao = [
+                    elemento.innerText,
+                    elemento.getAttribute('aria-label'),
+                    elemento.getAttribute('title'),
+                    elemento.getAttribute('data-testid')
+                ].filter(Boolean).join(' ').toLowerCase();
+
+                if (/(^|\\s)(share|compartilhar|star|favorite|favorito|edit|editar|github|main menu|manage app)(\\s|$)/i.test(identificacao)) {
+                    elemento.style.setProperty('display', 'none', 'important');
+                    elemento.style.setProperty('visibility', 'hidden', 'important');
+                }
+            });
+        };
+
+        if (win.__catalogoToolbarObserver) {
+            win.__catalogoToolbarObserver.disconnect();
+        }
+        const observer = new win.MutationObserver(ocultarAcoesDoCabecalho);
+        observer.observe(doc.documentElement, {childList: true, subtree: true});
+        win.__catalogoToolbarObserver = observer;
+        ocultarAcoesDoCabecalho();
+    })();
+    </script>
+    """,
+    height=0,
+)
+
+
+def configurar_protecao_navegador(bloquear: bool) -> None:
+    """Ativa bloqueios de cópia/impressão/salvamento para o perfil Usuário.
+
+    É uma proteção de interface: dificulta as ações comuns do navegador, mas
+    nenhum site consegue impedir de forma absoluta uma captura feita pelo
+    sistema operacional, por extensões ou pelas ferramentas de desenvolvedor.
+    """
+    script = """
+    <script>
+    (() => {
+        const win = window.parent;
+        const doc = win.document;
+
+        if (win.__protecaoCatalogo) {
+            win.__protecaoCatalogo.abort();
+            delete win.__protecaoCatalogo;
+        }
+
+        doc.body.classList.remove('protecao-catalogo-ativa');
+        doc.body.classList.remove('protecao-catalogo-captura');
+
+        const bloquear = __BLOQUEAR__;
+        if (!bloquear) return;
+
+        const controller = new win.AbortController();
+        const opcoes = {capture: true, signal: controller.signal};
+        let temporizadorCaptura = null;
+
+        const elementoEditavel = alvo =>
+            alvo instanceof win.Element &&
+            Boolean(alvo.closest('input, textarea, select, [contenteditable="true"]'));
+
+        const imagemProtegida = alvo =>
+            alvo instanceof win.Element &&
+            Boolean(alvo.closest('.imagem-protegida, .foto-protegida'));
+
+        const impedir = evento => {
+            evento.preventDefault();
+            evento.stopImmediatePropagation();
+        };
+
+        const ativarDesfoqueTemporario = () => {
+            doc.body.classList.add('protecao-catalogo-captura');
+            if (temporizadorCaptura) win.clearTimeout(temporizadorCaptura);
+            temporizadorCaptura = win.setTimeout(
+                () => doc.body.classList.remove('protecao-catalogo-captura'),
+                1800
+            );
+        };
+
+        doc.body.classList.add('protecao-catalogo-ativa');
+
+        doc.addEventListener('contextmenu', evento => {
+            if (!elementoEditavel(evento.target)) impedir(evento);
+        }, opcoes);
+
+        doc.addEventListener('dragstart', evento => {
+            if (imagemProtegida(evento.target)) impedir(evento);
+        }, opcoes);
+
+        doc.addEventListener('selectstart', evento => {
+            if (!elementoEditavel(evento.target)) impedir(evento);
+        }, opcoes);
+
+        doc.addEventListener('copy', evento => {
+            if (!elementoEditavel(evento.target)) impedir(evento);
+        }, opcoes);
+
+        doc.addEventListener('cut', evento => {
+            if (!elementoEditavel(evento.target)) impedir(evento);
+        }, opcoes);
+
+        doc.addEventListener('keydown', evento => {
+            const tecla = String(evento.key || '').toLowerCase();
+            const atalho = evento.ctrlKey || evento.metaKey;
+            const capturaWindows = evento.metaKey && evento.shiftKey && tecla === 's';
+
+            if (tecla === 'printscreen' || capturaWindows) {
+                impedir(evento);
+                ativarDesfoqueTemporario();
+                try {
+                    win.navigator.clipboard.writeText('');
+                } catch (_) {}
+                return;
+            }
+
+            const bloquearAtalho =
+                atalho && (
+                    tecla === 'p' ||
+                    tecla === 's' ||
+                    ((tecla === 'c' || tecla === 'x') && !elementoEditavel(evento.target))
+                );
+
+            if (bloquearAtalho) impedir(evento);
+        }, opcoes);
+
+        win.addEventListener('blur', () => {
+            doc.body.classList.add('protecao-catalogo-captura');
+        }, opcoes);
+        win.addEventListener('focus', () => {
+            doc.body.classList.remove('protecao-catalogo-captura');
+        }, opcoes);
+        win.addEventListener('beforeprint', ativarDesfoqueTemporario, opcoes);
+        win.addEventListener('afterprint', () => {
+            doc.body.classList.remove('protecao-catalogo-captura');
+        }, opcoes);
+
+        win.__protecaoCatalogo = controller;
+    })();
+    </script>
+    """.replace("__BLOQUEAR__", json.dumps(bool(bloquear)))
+    components.html(script, height=0)
+
 # --- AUTENTICAÇÃO (usuário e senha) ---
 URL_PLANILHA = ""
 if "connections" in st.secrets and "google_script_url" in st.secrets["connections"]:
@@ -489,6 +711,9 @@ if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 
 if not st.session_state.autenticado:
+    # Garante que uma proteção da sessão anterior não permaneça ativa na tela
+    # de login após o logout ou a troca de perfil.
+    configurar_protecao_navegador(False)
     col_esq, col_meio, col_dir = st.columns([1, 1.1, 1])
     with col_meio:
         st.markdown(
@@ -538,6 +763,10 @@ if "connections" in st.secrets and "google_script_url" in st.secrets["connection
 URL_BASE_DADOS = "https://docs.google.com/spreadsheets/d/1C5bL1iEyNdjPJBEPgCTW4ZWIDBSmo8Dj6vOLvunpMmg"
 
 PADRAO_ID_DRIVE = re.compile(r"[-\w]{25,}")
+# Compatibilidade com versões antigas do Apps Script que validam Série,
+# Modelo ou Unidade como obrigatórios. O caractere é visualmente vazio e é
+# removido novamente em toda leitura feita pelo app.
+VALOR_VAZIO_BACKEND_LEGADO = "\u200b"
 
 def normalizar_perfil(valor: str) -> str:
     """Padroniza os nomes de perfil recebidos do backend ou dos Secrets."""
@@ -550,6 +779,33 @@ def normalizar_perfil(valor: str) -> str:
         "usuário": "usuario",
     }
     return aliases.get(perfil, "usuario")
+
+
+def limpar_campo_opcional(valor) -> str:
+    """Converte valores vazios/NaN e o marcador legado em texto realmente vazio."""
+    if valor is None:
+        return ""
+    try:
+        if pd.isna(valor):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    return str(valor).replace(VALOR_VAZIO_BACKEND_LEGADO, "").strip()
+
+
+def campo_opcional_para_backend_legado(valor) -> str:
+    """Fornece um valor invisível somente ao refazer uma requisição recusada."""
+    texto = limpar_campo_opcional(valor)
+    return texto if texto else VALOR_VAZIO_BACKEND_LEGADO
+
+
+def texto_sem_acentos(valor) -> str:
+    """Normaliza mensagens do backend para comparar validações antigas."""
+    return "".join(
+        caractere
+        for caractere in unicodedata.normalize("NFKD", str(valor or ""))
+        if not unicodedata.combining(caractere)
+    ).casefold()
 
 
 @st.cache_data(show_spinner=False, ttl=300)
@@ -566,11 +822,11 @@ def carregar_modelos_existentes():
         dados_modelos = pd.read_csv(io.StringIO(resposta.text))
         if dados_modelos.empty or len(dados_modelos.columns) == 0:
             return []
-        modelos = {
-            str(valor).strip().upper()
-            for valor in dados_modelos.iloc[:, 0].dropna()
-            if str(valor).strip()
-        }
+        modelos = set()
+        for valor in dados_modelos.iloc[:, 0].dropna():
+            modelo = limpar_campo_opcional(valor).upper()
+            if modelo:
+                modelos.add(modelo)
         return sorted(modelos, key=str.casefold)
     except Exception:
         return []
@@ -583,6 +839,16 @@ def extrair_id_drive(valor: str):
 def montar_url_drive(valor: str, tamanho: int = 400) -> str:
     file_id = extrair_id_drive(valor)
     return f"https://drive.google.com/thumbnail?id={file_id}&sz=w{tamanho}"
+
+
+def montar_urls_drive_original(valor: str) -> list[str]:
+    """Retorna URLs que entregam o arquivo original armazenado no Drive."""
+    file_id = quote(extrair_id_drive(valor), safe="")
+    return [
+        f"https://drive.usercontent.google.com/download?id={file_id}&export=download&confirm=t",
+        f"https://drive.google.com/uc?export=download&confirm=t&id={file_id}",
+    ]
+
 
 def slug(valor: str) -> str:
     """Deixa o texto seguro para usar em nome de arquivo / id de HTML / key do Streamlit."""
@@ -656,9 +922,9 @@ def obter_data_uri_imagem(valor):
     return f"data:image/jpeg;base64,{b64}"
 
 
-@st.cache_data(show_spinner=False, ttl=3600, max_entries=1000)
+@st.cache_data(show_spinner=False, ttl=3600, max_entries=200)
 def baixar_imagem_para_excel(valor):
-    """Baixa a foto para inseri-la fisicamente no arquivo Excel."""
+    """Baixa os bytes originais da foto para incorporá-los ao Excel."""
     if valor is None or valor == "PENDENTE_UPLOAD_DRIVE":
         return None
     valor = str(valor).strip()
@@ -666,37 +932,76 @@ def baixar_imagem_para_excel(valor):
         return None
     try:
         if valor.startswith("data:image"):
-            return base64.b64decode(valor.split(",", 1)[1])
-        # A mesma origem usada no mosaico, porém em resolução maior para Excel.
-        resposta = requests.get(montar_url_drive(valor, tamanho=1600), timeout=30)
-        resposta.raise_for_status()
-        if "image" not in resposta.headers.get("Content-Type", ""):
-            return None
-        return resposta.content
+            return base64.b64decode(valor.split(",", 1)[1], validate=True)
+
+        # A miniatura do mosaico continua leve. Para o Excel, tentamos as URLs
+        # de download do arquivo original, sem limite de largura ou qualidade.
+        for url_original in montar_urls_drive_original(valor):
+            resposta = requests.get(url_original, timeout=60, allow_redirects=True)
+            resposta.raise_for_status()
+            tipo = resposta.headers.get("Content-Type", "").lower()
+            if "text/html" in tipo:
+                continue
+            if resposta.content:
+                return resposta.content
+        return None
     except Exception:
         return None
 
 
-def preparar_imagem_excel(conteudo):
-    """Garante que a imagem seja aceita pelo Excel (JPEG/PNG/GIF/BMP)."""
+FORMATOS_NATIVOS_EXCEL = {
+    "JPEG": ".jpg",
+    "PNG": ".png",
+    "GIF": ".gif",
+    "BMP": ".bmp",
+}
+
+
+def preparar_imagem_excel(conteudo, caixa_px: int = 112):
+    """Preserva a qualidade e reduz somente a escala visual dentro da célula.
+
+    JPEG, PNG, GIF e BMP são incorporados com os mesmos bytes recebidos. WebP
+    e formatos não nativos são convertidos para PNG sem reduzir as dimensões.
+    """
     if not conteudo:
         return None
     try:
-        # WebP, por exemplo, é convertido para JPEG antes de ser incorporado.
         from PIL import Image
-        imagem = Image.open(io.BytesIO(conteudo)).convert("RGBA")
-        tamanho_caixa = 120
-        imagem.thumbnail((tamanho_caixa, tamanho_caixa), Image.Resampling.LANCZOS)
-        fundo = Image.new("RGBA", (tamanho_caixa, tamanho_caixa), "white")
-        posicao = (
-            (tamanho_caixa - imagem.width) // 2,
-            (tamanho_caixa - imagem.height) // 2,
+
+        bytes_excel = conteudo
+        with Image.open(io.BytesIO(conteudo)) as imagem:
+            formato = str(imagem.format or "").upper()
+            largura, altura = imagem.size
+            dpi = imagem.info.get("dpi", (96, 96))
+
+            try:
+                dpi_x = float(dpi[0]) if float(dpi[0]) > 0 else 96.0
+                dpi_y = float(dpi[1]) if float(dpi[1]) > 0 else 96.0
+            except (TypeError, ValueError, IndexError):
+                dpi_x = dpi_y = 96.0
+
+            if formato not in FORMATOS_NATIVOS_EXCEL:
+                # PNG é sem perdas e mantém todos os pixels do arquivo recebido.
+                convertido = io.BytesIO()
+                imagem.convert("RGBA").save(
+                    convertido,
+                    format="PNG",
+                    dpi=(dpi_x, dpi_y),
+                )
+                bytes_excel = convertido.getvalue()
+                formato = "PNG"
+
+        largura_visual = largura * 96.0 / dpi_x
+        altura_visual = altura * 96.0 / dpi_y
+        escala = min(
+            caixa_px / max(largura_visual, 1.0),
+            caixa_px / max(altura_visual, 1.0),
+            1.0,
         )
-        fundo.alpha_composite(imagem, dest=posicao)
-        saida = io.BytesIO()
-        fundo.convert("RGB").save(saida, format="JPEG", quality=90)
-        saida.seek(0)
-        return saida
+
+        fluxo = io.BytesIO(bytes_excel)
+        fluxo.seek(0)
+        return fluxo, FORMATOS_NATIVOS_EXCEL[formato], escala
     except Exception:
         return None
 
@@ -907,9 +1212,8 @@ def criar_excel_por_codigos(codigos, dados):
     return arquivo.getvalue()
 
 
-def enviar_para_backend(payload: dict) -> tuple:
-    """Envia qualquer ação (criar/editar/excluir) para o Apps Script.
-    Retorna (sucesso: bool, mensagem: str)."""
+def _postar_no_backend(payload: dict) -> tuple:
+    """Executa uma única requisição ao Apps Script."""
     if not URL_PLANILHA:
         return False, "URL do sistema (google_script_url) não configurada nos Secrets."
     try:
@@ -922,16 +1226,67 @@ def enviar_para_backend(payload: dict) -> tuple:
             # Por isso, também verificamos o JSON devolvido pelo webhook.
             try:
                 retorno = resposta.json()
-                if retorno.get("ok") is False or retorno.get("sucesso") is False:
-                    return False, retorno.get("mensagem", "O backend recusou a operação.")
             except ValueError:
-                # Compatibilidade com versões antigas do Apps Script que não
-                # retornavam JSON.
-                pass
+                # Compatibilidade com versões antigas que devolvem texto puro.
+                texto_retorno = resposta.text.strip()
+                texto_normalizado = texto_sem_acentos(texto_retorno)
+                if any(
+                    marcador in texto_normalizado
+                    for marcador in ("erro", "falha", "preencha", "obrigatori")
+                ):
+                    return False, texto_retorno or "O backend recusou a operação."
+                return True, "ok"
+
+            if isinstance(retorno, dict):
+                status = texto_sem_acentos(retorno.get("status", ""))
+                falhou = (
+                    retorno.get("ok") is False
+                    or retorno.get("sucesso") is False
+                    or status in {"erro", "error", "falha"}
+                )
+                if falhou:
+                    return False, retorno.get("mensagem", "O backend recusou a operação.")
             return True, "ok"
         return False, f"Erro ao salvar: {resposta.status_code}"
     except Exception as e:
         return False, f"Erro de conexão: {e}"
+
+
+def enviar_para_backend(payload: dict) -> tuple:
+    """Envia a ação e contorna a validação antiga dos campos opcionais.
+
+    A primeira tentativa sempre envia Série, Modelo e Unidade realmente vazios.
+    Se um Apps Script antigo responder que algum desses campos é obrigatório,
+    o app refaz uma única vez usando um marcador invisível. Assim Código + Foto
+    já funcionam agora, sem exibir conteúdo falso nos cards ou nos arquivos.
+    """
+    sucesso, mensagem = _postar_no_backend(payload)
+    if sucesso:
+        return sucesso, mensagem
+
+    acao = str(payload.get("acao", "")).strip().casefold()
+    mensagem_normalizada = texto_sem_acentos(mensagem)
+    menciona_opcional = any(
+        campo in mensagem_normalizada
+        for campo in ("serie", "modelo", "ambiente", "unidade")
+    )
+    parece_validacao = any(
+        termo in mensagem_normalizada
+        for termo in ("preencha", "obrigatori", "informe", "necessari")
+    )
+
+    if acao in {"criar", "editar"} and menciona_opcional and parece_validacao:
+        payload_compatibilidade = dict(payload)
+        alterou_payload = False
+        for campo in ("serie", "modelo", "ambiente"):
+            if not limpar_campo_opcional(payload_compatibilidade.get(campo)):
+                payload_compatibilidade[campo] = campo_opcional_para_backend_legado("")
+                alterou_payload = True
+
+        if alterou_payload:
+            return _postar_no_backend(payload_compatibilidade)
+
+    return sucesso, mensagem
 
 
 if "form_counter" not in st.session_state: st.session_state.form_counter = 0
@@ -950,6 +1305,10 @@ pode_gerenciar_catalogo = perfil_usuario in {"admin", "engenharia"}
 # Permissão separada para evitar que uma futura mudança na edição do catálogo
 # libere, por engano, exportações ou download de fotos.
 pode_baixar_arquivos = perfil_usuario in {"admin", "engenharia"}
+
+# Usuário comum recebe as proteções de interface. Engenharia e Administrador
+# mantêm os downloads autorizados e removem eventuais listeners da sessão.
+configurar_protecao_navegador(not pode_baixar_arquivos)
 
 if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
     st.sidebar.divider()
