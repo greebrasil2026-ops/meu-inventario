@@ -19,11 +19,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # campo "acao" do JSON:
 #
 #   "acao": "criar"   -> comportamento que já existia (adiciona uma linha)
-#   "acao": "editar"  -> deve localizar a linha cujo Código == "codigo_original"
-#                         e sobrescrever Série/Modelo/Ambiente/Código, e só
-#                         trocar a coluna Imagem se o campo "imagem" vier
-#                         preenchido (se vier None/ausente, mantém a foto atual)
-#   "acao": "excluir" -> deve REMOVER a linha cujo Código == "codigo"
+#   "acao": "editar"  -> localiza pela combinação "codigo_original" +
+#                         "modelo_original", sobrescreve os dados e só troca a
+#                         Imagem quando o campo "imagem" vier preenchido
+#   "acao": "excluir" -> remove pela combinação Código + Modelo
 #
 # Em "editar" e "excluir" o app também manda "motivo" (obrigatório só na
 # exclusão) e "usuario" (quem está logado). O ideal é que o Apps Script,
@@ -143,11 +142,13 @@ st.markdown("""
     }
 
     section[data-testid="stSidebar"] .stTextInput input,
-    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] {
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"],
+    section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] {
         background-color: #16213A !important; color: #F1F5F9 !important;
         border-radius: 8px !important; border: 1px solid #2A3752 !important;
     }
-    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] * {
+    section[data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] *,
+    section[data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] * {
         color: #F1F5F9 !important;
     }
 
@@ -260,14 +261,16 @@ st.markdown("""
 
     /* Rótulos dos campos na área principal (Filtros de Busca) */
     div[data-testid="stTextInput"] label p,
-    div[data-testid="stSelectbox"] label p {
+    div[data-testid="stSelectbox"] label p,
+    div[data-testid="stMultiSelect"] label p {
         color: #312E81 !important; font-weight: 700 !important; font-size: 13.5px;
     }
 
     /* Rótulos do formulário de cadastro na barra lateral. A regra específica
     garante texto branco mesmo com o estilo dos filtros da área principal. */
     section[data-testid="stSidebar"] div[data-testid="stTextInput"] label p,
-    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label p {
+    section[data-testid="stSidebar"] div[data-testid="stSelectbox"] label p,
+    section[data-testid="stSidebar"] div[data-testid="stMultiSelect"] label p {
         color: #FFFFFF !important;
         -webkit-text-fill-color: #FFFFFF !important;
         font-family: 'Inter', sans-serif !important;
@@ -643,7 +646,7 @@ def configurar_protecao_navegador(bloquear: bool) -> None:
                 impedir(evento);
                 ativarDesfoqueTemporario();
                 try {
-                    win.navigator.clipboard.writeText('');
+                    void win.navigator.clipboard?.writeText('').catch(() => {});
                 } catch (_) {}
                 return;
             }
@@ -776,6 +779,7 @@ def normalizar_perfil(valor: str) -> str:
         "admin": "admin",
         "administrador": "admin",
         "engenharia": "engenharia",
+        "engenheiro": "engenharia",
         "usuario": "usuario",
         "usuário": "usuario",
     }
@@ -1047,12 +1051,23 @@ def criar_excel_modelo(modelo, dados_modelo, imagens):
             for coluna, campo in enumerate(cabecalhos[:4]):
                 valor = item.get(campo, "")
                 planilha.write(linha_excel, coluna, "" if pd.isna(valor) else str(valor), estilo_texto)
-            foto = preparar_imagem_excel(imagens.get(indice))
-            if foto:
+            foto_preparada = preparar_imagem_excel(imagens.get(indice))
+            if foto_preparada:
+                foto, extensao, escala = foto_preparada
                 planilha.write_blank(linha_excel, 4, None, estilo_texto)
-                planilha.insert_image(linha_excel, 4, "imagem.jpg", {
-                    "image_data": foto, "x_offset": 5, "y_offset": 4, "object_position": 1,
-                })
+                planilha.insert_image(
+                    linha_excel,
+                    4,
+                    f"imagem_{linha_excel}{extensao}",
+                    {
+                        "image_data": foto,
+                        "x_scale": escala,
+                        "y_scale": escala,
+                        "x_offset": 5,
+                        "y_offset": 4,
+                        "object_position": 1,
+                    },
+                )
             else:
                 planilha.write(linha_excel, 4, "Imagem indisponível", estilo_aviso)
     return arquivo.getvalue()
@@ -1123,28 +1138,50 @@ def extrair_codigos(texto):
 
 
 def criar_excel_por_codigos(codigos, dados):
-    """Cria um Excel com Código na coluna A e a foto incorporada na coluna B."""
+    """Exporta todos os modelos encontrados para cada código informado.
+
+    Um mesmo código pode aparecer em várias linhas, desde que pertença a
+    modelos diferentes. O Excel usa Código, Modelo e Foto para deixar cada
+    ocorrência claramente identificada.
+    """
     dados = dados.copy()
     dados["_codigo_normalizado"] = (
         dados["Código"].fillna("").astype(str).str.strip().str.upper()
     )
+    dados["_modelo_normalizado"] = (
+        dados["Modelo"].fillna("").astype(str).str.strip().str.upper()
+    )
 
-    # Mantém a ordem em que os códigos foram colados. Em caso de código
-    # duplicado na planilha, usa a primeira ocorrência.
+    # Mantém a ordem digitada e inclui todas as ocorrências do código.
     por_codigo = {}
     for indice, item in dados.iterrows():
         codigo_normalizado = item["_codigo_normalizado"]
-        if codigo_normalizado and codigo_normalizado not in por_codigo:
-            por_codigo[codigo_normalizado] = (indice, item)
+        if codigo_normalizado:
+            por_codigo.setdefault(codigo_normalizado, []).append((indice, item))
+
+    registros_exportacao = []
+    for codigo in codigos:
+        encontrados = por_codigo.get(codigo, [])
+        if encontrados:
+            for indice, item in encontrados:
+                registros_exportacao.append((codigo, indice, item))
+        else:
+            registros_exportacao.append((codigo, None, None))
 
     imagens = {}
-    with ThreadPoolExecutor(max_workers=min(8, max(1, len(codigos)))) as executor:
+    registros_com_foto = [
+        (indice, item)
+        for _, indice, item in registros_exportacao
+        if item is not None
+    ]
+    with ThreadPoolExecutor(
+        max_workers=min(8, max(1, len(registros_com_foto)))
+    ) as executor:
         futuros = {}
-        for codigo in codigos:
-            registro = por_codigo.get(codigo)
-            if registro:
-                _, item = registro
-                futuros[executor.submit(baixar_imagem_para_excel, item.get("Imagem"))] = codigo
+        for indice, item in registros_com_foto:
+            futuros[
+                executor.submit(baixar_imagem_para_excel, item.get("Imagem"))
+            ] = indice
         for futuro in as_completed(futuros):
             imagens[futuros[futuro]] = futuro.result()
 
@@ -1187,31 +1224,66 @@ def criar_excel_por_codigos(codigos, dados):
         })
 
         planilha.write(0, 0, "Código", estilo_cabecalho)
-        planilha.write(0, 1, "Foto", estilo_cabecalho)
+        planilha.write(0, 1, "Modelo", estilo_cabecalho)
+        planilha.write(0, 2, "Foto", estilo_cabecalho)
         planilha.set_row(0, 24)
         planilha.set_column("A:A", 24)
-        planilha.set_column("B:B", 19)
+        planilha.set_column("B:B", 28)
+        planilha.set_column("C:C", 19)
         planilha.freeze_panes(1, 0)
-        planilha.autofilter(0, 0, len(codigos), 1)
+        planilha.autofilter(0, 0, len(registros_exportacao), 2)
 
-        for linha_excel, codigo in enumerate(codigos, start=1):
+        for linha_excel, (codigo, indice, item) in enumerate(
+            registros_exportacao,
+            start=1,
+        ):
             planilha.set_row(linha_excel, 96)
             planilha.write_string(linha_excel, 0, codigo, estilo_codigo)
 
-            registro = por_codigo.get(codigo)
-            foto = preparar_imagem_excel(imagens.get(codigo)) if registro else None
-            if foto:
-                planilha.write_blank(linha_excel, 1, None, estilo_foto)
-                planilha.insert_image(linha_excel, 1, f"{slug(codigo)}.jpg", {
-                    "image_data": foto,
-                    "x_offset": 5,
-                    "y_offset": 4,
-                    "object_position": 1,
-                })
-            elif registro:
-                planilha.write(linha_excel, 1, "Imagem indisponível", estilo_aviso)
+            if item is not None:
+                modelo = limpar_campo_opcional(item.get("Modelo", ""))
+                planilha.write(
+                    linha_excel,
+                    1,
+                    modelo or "SEM MODELO",
+                    estilo_codigo,
+                )
+                foto_preparada = preparar_imagem_excel(imagens.get(indice))
             else:
-                planilha.write(linha_excel, 1, "Código não encontrado", estilo_aviso)
+                modelo = ""
+                planilha.write_blank(linha_excel, 1, None, estilo_codigo)
+                foto_preparada = None
+
+            if foto_preparada:
+                foto, extensao, escala = foto_preparada
+                planilha.write_blank(linha_excel, 2, None, estilo_foto)
+                planilha.insert_image(
+                    linha_excel,
+                    2,
+                    f"{slug(codigo)}_{slug(modelo or 'SEM_MODELO')}{extensao}",
+                    {
+                        "image_data": foto,
+                        "x_scale": escala,
+                        "y_scale": escala,
+                        "x_offset": 5,
+                        "y_offset": 4,
+                        "object_position": 1,
+                    },
+                )
+            elif item is not None:
+                planilha.write(
+                    linha_excel,
+                    2,
+                    "Imagem indisponível",
+                    estilo_aviso,
+                )
+            else:
+                planilha.write(
+                    linha_excel,
+                    2,
+                    "Código não encontrado",
+                    estilo_aviso,
+                )
 
     return arquivo.getvalue()
 
@@ -1312,7 +1384,7 @@ pode_baixar_arquivos = perfil_usuario in {"admin", "engenharia"}
 
 # Usuário comum recebe as proteções de interface. Engenharia e Administrador
 # mantêm os downloads autorizados e removem eventuais listeners da sessão.
-configurar_protecao_navegador(not pode_baixar_arquivos)
+configurar_protecao_navegador(perfil_usuario == "usuario")
 
 if USAR_GESTAO_USUARIOS and perfil_usuario == "admin":
     st.sidebar.divider()
@@ -1493,15 +1565,26 @@ if st.session_state.pagina_app == "catalogo":
                 key=f"serie_{key_suffix}",
             ).strip().upper()
 
-            input_modelo_bruto = st.sidebar.selectbox(
-                "MODELO (opcional):",
+            input_modelos_brutos = st.sidebar.multiselect(
+                "MODELO(S) (opcional):",
                 options=carregar_modelos_existentes(),
-                index=None,
-                placeholder="Escolha um modelo ou digite um novo",
+                placeholder="Escolha ou digite um ou vários modelos",
                 accept_new_options=True,
                 key=f"modelo_{key_suffix}",
             )
-            input_modelo = str(input_modelo_bruto or "").strip().upper()
+            input_modelos = []
+            modelos_vistos = set()
+            for modelo_bruto in input_modelos_brutos:
+                modelo_normalizado = str(modelo_bruto or "").strip().upper()
+                if (
+                    modelo_normalizado
+                    and modelo_normalizado.casefold() not in modelos_vistos
+                ):
+                    input_modelos.append(modelo_normalizado)
+                    modelos_vistos.add(modelo_normalizado.casefold())
+            st.sidebar.caption(
+                "O mesmo Código será cadastrado uma vez para cada modelo selecionado."
+            )
 
             input_ambiente = st.sidebar.selectbox(
                 "UNIDADE (opcional):",
@@ -1525,12 +1608,17 @@ if st.session_state.pagina_app == "catalogo":
                     st.sidebar.error("⚠️ A URL do sistema não foi configurada.")
                 else:
                     with st.spinner("Enviando foto para o Drive..."):
+                        modelos_backend = [
+                            campo_opcional_para_backend_legado(modelo)
+                            for modelo in input_modelos
+                        ] or [campo_opcional_para_backend_legado("")]
                         dados_envio = {
                             "acao": "criar",
                             # O marcador garante compatibilidade até com uma
                             # implantação antiga que ainda exige estes campos.
                             "serie": campo_opcional_para_backend_legado(input_serie),
-                            "modelo": campo_opcional_para_backend_legado(input_modelo),
+                            "modelo": modelos_backend[0],
+                            "modelos": modelos_backend,
                             "ambiente": campo_opcional_para_backend_legado(input_ambiente),
                             "codigo": input_codigo,
                             "imagem": arquivo_para_data_uri(foto_com_dados),
@@ -1538,7 +1626,10 @@ if st.session_state.pagina_app == "catalogo":
                         }
                         sucesso, msg = enviar_para_backend(dados_envio)
                         if sucesso:
-                            st.sidebar.success("✅ Salvo com sucesso!")
+                            quantidade_modelos = max(1, len(input_modelos))
+                            st.sidebar.success(
+                                f"✅ {quantidade_modelos} registro(s) salvo(s)!"
+                            )
                             st.session_state.form_counter += 1
                             st.cache_data.clear()
                             st.rerun()
@@ -1606,6 +1697,9 @@ if st.session_state.pagina_app == "catalogo":
                 payload_edicao = {
                     "acao": "editar",
                     "codigo_original": st.session_state.editando_codigo,
+                    "modelo_original": campo_opcional_para_backend_legado(
+                        dados.get("Modelo", "")
+                    ),
                     "serie": campo_opcional_para_backend_legado(edit_serie),
                     "modelo": campo_opcional_para_backend_legado(edit_modelo),
                     "ambiente": campo_opcional_para_backend_legado(edit_ambiente),
@@ -1725,14 +1819,15 @@ if st.session_state.pagina_app == "catalogo":
         # O perfil Usuário não consegue nem preparar o arquivo em memória.
         if pode_baixar_arquivos:
             # -----------------------------------------------------------------
-            # EXPORTAÇÃO POR LISTA DE CÓDIGOS: gera Código + Foto e mantém a
-            # ordem em que os códigos foram informados.
+            # EXPORTAÇÃO POR LISTA DE CÓDIGOS: inclui todos os modelos ligados
+            # a cada código e mantém a ordem em que os códigos foram informados.
             # -----------------------------------------------------------------
             with st.expander("📸 Exportar fotos por códigos", expanded=True):
                 st.write(
                     "Cole 10, 20 ou mais códigos abaixo, separados por linha, espaço, "
-                    "vírgula ou ponto e vírgula. O Excel terá o código na coluna A e "
-                    "a foto incorporada na coluna B."
+                    "vírgula ou ponto e vírgula. O Excel terá Código, Modelo e a "
+                    "foto original incorporada. Códigos usados em vários modelos "
+                    "aparecerão em várias linhas."
                 )
                 texto_codigos = st.text_area(
                     "Códigos para exportar",
@@ -1863,7 +1958,10 @@ if st.session_state.pagina_app == "catalogo":
                 bloco = linhas_pagina[inicio_linha:inicio_linha + 4]
                 for coluna, (idx, linha) in zip(colunas, bloco):
                     with coluna:
-                        nome_arquivo = f"{slug(linha['Série'])}_{slug(linha['Código'])}.jpg"
+                        nome_arquivo = (
+                            f"{slug(linha['Modelo'] or 'SEM_MODELO')}_"
+                            f"{slug(linha['Código'])}.jpg"
+                        )
                         data_uri = resultados_imagens.get(idx)
 
                         if data_uri:
@@ -1877,8 +1975,14 @@ if st.session_state.pagina_app == "catalogo":
                                 '''
                             else:
                                 html_foto = f'''
-                                    <div class="foto-frame" oncontextmenu="return false;">
-                                        <img src="{data_uri}" loading="lazy" draggable="false"
+                                    <div class="foto-frame foto-protegida"
+                                         oncontextmenu="return false;">
+                                        <img class="imagem-protegida"
+                                             src="{data_uri}" loading="lazy"
+                                             draggable="false"
+                                             oncontextmenu="return false;"
+                                             ondragstart="return false;"
+                                             onselectstart="return false;"
                                              style="cursor: default; -webkit-user-drag: none; user-select: none;">
                                     </div>
                                 '''
