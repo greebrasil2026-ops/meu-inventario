@@ -1,4 +1,5 @@
 import re
+import inspect
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
@@ -932,29 +933,71 @@ def obter_data_uri_imagem(valor):
 
 @st.cache_data(show_spinner=False, ttl=3600, max_entries=200)
 def baixar_imagem_para_excel(valor):
-    """Baixa os bytes originais da foto para incorporá-los ao Excel."""
+    """Baixa e valida os bytes originais da foto para incorporá-los ao Excel."""
     if valor is None or valor == "PENDENTE_UPLOAD_DRIVE":
         return None
     valor = str(valor).strip()
     if not valor:
         return None
+
+    def imagem_valida(conteudo):
+        if not conteudo:
+            return False
+        try:
+            from PIL import Image
+
+            with Image.open(io.BytesIO(conteudo)) as imagem:
+                largura, altura = imagem.size
+                imagem.verify()
+            return largura > 0 and altura > 0
+        except Exception:
+            return False
+
     try:
         if valor.startswith("data:image"):
-            return base64.b64decode(valor.split(",", 1)[1], validate=True)
+            conteudo = base64.b64decode(valor.split(",", 1)[1], validate=True)
+            return conteudo if imagem_valida(conteudo) else None
 
-        # A miniatura do mosaico continua leve. Para o Excel, tentamos as URLs
-        # de download do arquivo original, sem limite de largura ou qualidade.
+        # Cada URL é tentada separadamente. Assim, uma falha no primeiro
+        # endpoint não impede o uso do segundo endereço de download original.
         for url_original in montar_urls_drive_original(valor):
-            resposta = requests.get(url_original, timeout=60, allow_redirects=True)
-            resposta.raise_for_status()
-            tipo = resposta.headers.get("Content-Type", "").lower()
-            if "text/html" in tipo:
+            try:
+                resposta = requests.get(
+                    url_original,
+                    timeout=60,
+                    allow_redirects=True,
+                    headers={"Accept": "image/*,application/octet-stream;q=0.9,*/*;q=0.5"},
+                )
+                resposta.raise_for_status()
+            except requests.RequestException:
                 continue
-            if resposta.content:
+
+            if imagem_valida(resposta.content):
                 return resposta.content
+
+        # Último recurso: pede ao Drive a maior prévia disponível, nunca a
+        # miniatura de 400 px usada no mosaico da tela.
+        file_id = quote(extrair_id_drive(valor), safe="")
+        try:
+            resposta = requests.get(
+                f"https://drive.google.com/thumbnail?id={file_id}&sz=w8192",
+                timeout=60,
+                allow_redirects=True,
+                headers={"Accept": "image/*,*/*;q=0.5"},
+            )
+            resposta.raise_for_status()
+            if imagem_valida(resposta.content):
+                return resposta.content
+        except requests.RequestException:
+            pass
+
         return None
     except Exception:
         return None
+
+
+FOTO_EXCEL_CAIXA_PX = 512
+FOTO_EXCEL_MARGEM_PX = 6
 
 
 FORMATOS_NATIVOS_EXCEL = {
@@ -965,11 +1008,17 @@ FORMATOS_NATIVOS_EXCEL = {
 }
 
 
-def preparar_imagem_excel(conteudo, caixa_px: int = 112):
-    """Preserva a qualidade e reduz somente a escala visual dentro da célula.
+def preparar_imagem_excel(
+    conteudo,
+    caixa_px: int = FOTO_EXCEL_CAIXA_PX,
+    margem_px: int = FOTO_EXCEL_MARGEM_PX,
+):
+    """Preserva os pixels originais e calcula a maior escala nativa possível.
 
     JPEG, PNG, GIF e BMP são incorporados com os mesmos bytes recebidos. WebP
     e formatos não nativos são convertidos para PNG sem reduzir as dimensões.
+    A imagem é centralizada numa célula grande, sem ampliar além dos pixels
+    existentes no arquivo original.
     """
     if not conteudo:
         return None
@@ -1001,17 +1050,85 @@ def preparar_imagem_excel(conteudo, caixa_px: int = 112):
 
         largura_visual = largura * 96.0 / dpi_x
         altura_visual = altura * 96.0 / dpi_y
-        escala = min(
+        escala_para_caber = min(
             caixa_px / max(largura_visual, 1.0),
             caixa_px / max(altura_visual, 1.0),
-            1.0,
         )
+        # O XlsxWriter/Excel considera 96 DPI na tela. Esta escala permite
+        # aproveitar imagens com DPI alto até o limite de seus pixels reais,
+        # sem criar pixels artificiais por ampliação.
+        escala_pixel_nativo = min(dpi_x / 96.0, dpi_y / 96.0)
+        escala = min(escala_para_caber, escala_pixel_nativo)
+
+        largura_renderizada = largura_visual * escala
+        altura_renderizada = altura_visual * escala
+        x_offset = margem_px + max(0, round((caixa_px - largura_renderizada) / 2))
+        y_offset = margem_px + max(0, round((caixa_px - altura_renderizada) / 2))
 
         fluxo = io.BytesIO(bytes_excel)
         fluxo.seek(0)
-        return fluxo, FORMATOS_NATIVOS_EXCEL[formato], escala
+        return (
+            fluxo,
+            FORMATOS_NATIVOS_EXCEL[formato],
+            escala,
+            x_offset,
+            y_offset,
+        )
     except Exception:
         return None
+
+
+def desativar_compressao_imagens_excel(conteudo_xlsx):
+    """Marca o XLSX para o Excel não recomprimir as fotos ao salvar.
+
+    O XlsxWriter incorpora JPEG/PNG sem alterar os bytes, mas o padrão do
+    formato permite que o Excel comprima as imagens num salvamento posterior.
+    Esta rotina ajusta somente a propriedade do workbook e preserva todas as
+    mídias já armazenadas no arquivo.
+    """
+    if not conteudo_xlsx:
+        return conteudo_xlsx
+
+    origem = io.BytesIO(conteudo_xlsx)
+    destino = io.BytesIO()
+
+    def ajustar_workbook_pr(correspondencia):
+        tag = correspondencia.group(0)
+        padrao_atributo = re.compile(
+            rb"\bautoCompressPictures\s*=\s*([\"'])[^\"']*\1"
+        )
+        if padrao_atributo.search(tag):
+            return padrao_atributo.sub(
+                b'autoCompressPictures="0"',
+                tag,
+                count=1,
+            )
+
+        fechamento = b"/>" if tag.endswith(b"/>") else b">"
+        return tag[:-len(fechamento)] + b' autoCompressPictures="0"' + fechamento
+
+    with zipfile.ZipFile(origem, "r") as zip_entrada:
+        with zipfile.ZipFile(destino, "w", allowZip64=True) as zip_saida:
+            zip_saida.comment = zip_entrada.comment
+            for informacao in zip_entrada.infolist():
+                dados = zip_entrada.read(informacao.filename)
+                if informacao.filename == "xl/workbook.xml":
+                    dados, alteracoes = re.subn(
+                        rb"<workbookPr\b[^>]*>",
+                        ajustar_workbook_pr,
+                        dados,
+                        count=1,
+                    )
+                    if alteracoes == 0:
+                        dados = re.sub(
+                            rb"(<workbook\b[^>]*>)",
+                            rb'\1<workbookPr autoCompressPictures="0"/>',
+                            dados,
+                            count=1,
+                        )
+                zip_saida.writestr(informacao, dados)
+
+    return destino.getvalue()
 
 
 def criar_excel_modelo(modelo, dados_modelo, imagens):
@@ -1042,18 +1159,25 @@ def criar_excel_modelo(modelo, dados_modelo, imagens):
         planilha.set_column("B:B", 24)
         planilha.set_column("C:C", 16)
         planilha.set_column("D:D", 20)
-        planilha.set_column("E:E", 18)
+        planilha.set_column_pixels(
+            4,
+            4,
+            FOTO_EXCEL_CAIXA_PX + 2 * FOTO_EXCEL_MARGEM_PX,
+        )
         planilha.freeze_panes(2, 0)
         planilha.autofilter(1, 0, len(dados_modelo) + 1, 4)
 
         for linha_excel, (indice, item) in enumerate(dados_modelo.iterrows(), start=2):
-            planilha.set_row(linha_excel, 96)
+            planilha.set_row_pixels(
+                linha_excel,
+                FOTO_EXCEL_CAIXA_PX + 2 * FOTO_EXCEL_MARGEM_PX,
+            )
             for coluna, campo in enumerate(cabecalhos[:4]):
                 valor = item.get(campo, "")
                 planilha.write(linha_excel, coluna, "" if pd.isna(valor) else str(valor), estilo_texto)
             foto_preparada = preparar_imagem_excel(imagens.get(indice))
             if foto_preparada:
-                foto, extensao, escala = foto_preparada
+                foto, extensao, escala, x_offset, y_offset = foto_preparada
                 planilha.write_blank(linha_excel, 4, None, estilo_texto)
                 planilha.insert_image(
                     linha_excel,
@@ -1063,14 +1187,14 @@ def criar_excel_modelo(modelo, dados_modelo, imagens):
                         "image_data": foto,
                         "x_scale": escala,
                         "y_scale": escala,
-                        "x_offset": 5,
-                        "y_offset": 4,
+                        "x_offset": x_offset,
+                        "y_offset": y_offset,
                         "object_position": 1,
                     },
                 )
             else:
                 planilha.write(linha_excel, 4, "Imagem indisponível", estilo_aviso)
-    return arquivo.getvalue()
+    return desativar_compressao_imagens_excel(arquivo.getvalue())
 
 
 def criar_zip_excel_por_modelo(dados):
@@ -1229,7 +1353,11 @@ def criar_excel_por_codigos(codigos, dados):
         planilha.set_row(0, 24)
         planilha.set_column("A:A", 24)
         planilha.set_column("B:B", 28)
-        planilha.set_column("C:C", 19)
+        planilha.set_column_pixels(
+            2,
+            2,
+            FOTO_EXCEL_CAIXA_PX + 2 * FOTO_EXCEL_MARGEM_PX,
+        )
         planilha.freeze_panes(1, 0)
         planilha.autofilter(0, 0, len(registros_exportacao), 2)
 
@@ -1237,7 +1365,10 @@ def criar_excel_por_codigos(codigos, dados):
             registros_exportacao,
             start=1,
         ):
-            planilha.set_row(linha_excel, 96)
+            planilha.set_row_pixels(
+                linha_excel,
+                FOTO_EXCEL_CAIXA_PX + 2 * FOTO_EXCEL_MARGEM_PX,
+            )
             planilha.write_string(linha_excel, 0, codigo, estilo_codigo)
 
             if item is not None:
@@ -1255,7 +1386,7 @@ def criar_excel_por_codigos(codigos, dados):
                 foto_preparada = None
 
             if foto_preparada:
-                foto, extensao, escala = foto_preparada
+                foto, extensao, escala, x_offset, y_offset = foto_preparada
                 planilha.write_blank(linha_excel, 2, None, estilo_foto)
                 planilha.insert_image(
                     linha_excel,
@@ -1265,8 +1396,8 @@ def criar_excel_por_codigos(codigos, dados):
                         "image_data": foto,
                         "x_scale": escala,
                         "y_scale": escala,
-                        "x_offset": 5,
-                        "y_offset": 4,
+                        "x_offset": x_offset,
+                        "y_offset": y_offset,
                         "object_position": 1,
                     },
                 )
@@ -1285,7 +1416,7 @@ def criar_excel_por_codigos(codigos, dados):
                     estilo_aviso,
                 )
 
-    return arquivo.getvalue()
+    return desativar_compressao_imagens_excel(arquivo.getvalue())
 
 
 def _postar_no_backend(payload: dict) -> tuple:
@@ -1539,9 +1670,15 @@ if st.session_state.pagina_app == "catalogo":
 
         foto_com_dados = None
         if origem == "Tirar Foto (Celular/PC)":
+            parametros_camera = {"key": f"camera_{key_suffix}"}
+            try:
+                if "resolution" in inspect.signature(st.camera_input).parameters:
+                    parametros_camera["resolution"] = "1080p"
+            except (TypeError, ValueError):
+                pass
             foto_com_dados = st.sidebar.camera_input(
                 "Aponte a câmera para o componente",
-                key=f"camera_{key_suffix}",
+                **parametros_camera,
             )
             st.sidebar.caption(
                 "⚠️ Se a câmera não aparecer: o navegador precisa da sua permissão. "
