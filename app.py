@@ -1013,59 +1013,87 @@ def preparar_imagem_excel(
     caixa_px: int = FOTO_EXCEL_CAIXA_PX,
     margem_px: int = FOTO_EXCEL_MARGEM_PX,
 ):
-    """Preserva os pixels originais e calcula a maior escala nativa possível.
+    """Preserva os pixels e calcula a escala com o mesmo leitor do XlsxWriter.
 
     JPEG, PNG, GIF e BMP são incorporados com os mesmos bytes recebidos. WebP
     e formatos não nativos são convertidos para PNG sem reduzir as dimensões.
-    A imagem é centralizada numa célula grande, sem ampliar além dos pixels
-    existentes no arquivo original.
+
+    É importante usar o DPI lido pelo próprio XlsxWriter. Algumas fotos guardam
+    o DPI apenas no EXIF: o Pillow pode ler 300 DPI enquanto o XlsxWriter assume
+    96 DPI. Se a escala for calculada com o primeiro valor, o Excel amplia a
+    imagem várias vezes e ela fica borrada, mesmo com os bytes originais.
     """
     if not conteudo:
         return None
     try:
         from PIL import Image
+        try:
+            from xlsxwriter.image import Image as XlsxWriterImage
+        except ImportError:
+            XlsxWriterImage = None
 
         bytes_excel = conteudo
         with Image.open(io.BytesIO(conteudo)) as imagem:
             formato = str(imagem.format or "").upper()
-            largura, altura = imagem.size
-            dpi = imagem.info.get("dpi", (96, 96))
-
-            try:
-                dpi_x = float(dpi[0]) if float(dpi[0]) > 0 else 96.0
-                dpi_y = float(dpi[1]) if float(dpi[1]) > 0 else 96.0
-            except (TypeError, ValueError, IndexError):
-                dpi_x = dpi_y = 96.0
 
             if formato not in FORMATOS_NATIVOS_EXCEL:
-                # PNG é sem perdas e mantém todos os pixels do arquivo recebido.
+                # PNG é sem perdas. O DPI é normalizado para a base usada pelo
+                # Excel, sem reduzir ou ampliar a quantidade de pixels.
                 convertido = io.BytesIO()
                 imagem.convert("RGBA").save(
                     convertido,
                     format="PNG",
-                    dpi=(dpi_x, dpi_y),
+                    dpi=(96, 96),
                 )
                 bytes_excel = convertido.getvalue()
-                formato = "PNG"
+
+        if XlsxWriterImage is None:
+            # Compatibilidade com versões muito antigas do XlsxWriter: cria
+            # uma cópia PNG em 96 DPI para eliminar qualquer ambiguidade.
+            with Image.open(io.BytesIO(bytes_excel)) as imagem:
+                largura, altura = imagem.size
+                normalizado = io.BytesIO()
+                imagem.convert("RGBA").save(
+                    normalizado,
+                    format="PNG",
+                    dpi=(96, 96),
+                )
+            bytes_excel = normalizado.getvalue()
+            fluxo = io.BytesIO(bytes_excel)
+            formato = "PNG"
+            dpi_x = dpi_y = 96.0
+        else:
+            fluxo = io.BytesIO(bytes_excel)
+            metadados_xlsx = XlsxWriterImage(fluxo)
+            formato = str(metadados_xlsx.image_type or "").upper()
+            largura = float(metadados_xlsx.width)
+            altura = float(metadados_xlsx.height)
+
+            try:
+                dpi_x = float(metadados_xlsx.x_dpi)
+                dpi_y = float(metadados_xlsx.y_dpi)
+                if dpi_x <= 0 or dpi_y <= 0:
+                    raise ValueError("DPI inválido")
+            except (TypeError, ValueError):
+                dpi_x = dpi_y = 96.0
+
+        if formato not in FORMATOS_NATIVOS_EXCEL or largura <= 0 or altura <= 0:
+            return None
 
         largura_visual = largura * 96.0 / dpi_x
         altura_visual = altura * 96.0 / dpi_y
-        escala_para_caber = min(
+        escala = min(
             caixa_px / max(largura_visual, 1.0),
             caixa_px / max(altura_visual, 1.0),
+            dpi_x / 96.0,
+            dpi_y / 96.0,
         )
-        # O XlsxWriter/Excel considera 96 DPI na tela. Esta escala permite
-        # aproveitar imagens com DPI alto até o limite de seus pixels reais,
-        # sem criar pixels artificiais por ampliação.
-        escala_pixel_nativo = min(dpi_x / 96.0, dpi_y / 96.0)
-        escala = min(escala_para_caber, escala_pixel_nativo)
 
         largura_renderizada = largura_visual * escala
         altura_renderizada = altura_visual * escala
         x_offset = margem_px + max(0, round((caixa_px - largura_renderizada) / 2))
         y_offset = margem_px + max(0, round((caixa_px - altura_renderizada) / 2))
 
-        fluxo = io.BytesIO(bytes_excel)
         fluxo.seek(0)
         return (
             fluxo,
